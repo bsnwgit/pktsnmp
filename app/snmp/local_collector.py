@@ -1,5 +1,5 @@
 """
-Local collector — in-process trap receiver and poll engine for pktSNMP O2.
+Local collector -- in-process trap receiver and poll engine for pktSNMP O2.
 Devices assigned to collector_id=1 are handled here.
 """
 from __future__ import annotations
@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from typing import TYPE_CHECKING
 
 import aiosqlite
 
@@ -15,23 +16,23 @@ from app.snmp.poll_engine import PollEngine
 from app.snmp.parser import parse_trap_payload
 from app.storage.factory import get_storage
 
+if TYPE_CHECKING:
+    from app.alerts.engine import AlertEngine
+
 log = logging.getLogger("pktsnmp.snmp.local_collector")
 
 
 class LocalCollector:
-    def __init__(self) -> None:
+    def __init__(self, alert_engine: "AlertEngine | None" = None) -> None:
+        self._alert_engine = alert_engine
         self._trap_receiver: TrapReceiver | None = None
         self._poll_engine: PollEngine | None = None
         self._trap_enabled: bool = False
         self._poll_enabled: bool = False
         self._db_path: str = ""
 
-    async def _get_setting(
-        self, db: aiosqlite.Connection, key: str, default=None
-    ):
-        async with db.execute(
-            "SELECT value FROM settings WHERE key=?", (key,)
-        ) as cur:
+    async def _get_setting(self, db: aiosqlite.Connection, key: str, default=None):
+        async with db.execute("SELECT value FROM settings WHERE key=?", (key,)) as cur:
             row = await cur.fetchone()
         return json.loads(row[0]) if row else default
 
@@ -52,11 +53,14 @@ class LocalCollector:
                 self._trap_receiver = None
 
         if self._poll_enabled:
-            self._poll_engine = PollEngine(self._handle_poll_result)
+            self._poll_engine = PollEngine(
+                self._handle_poll_result,
+                failure_handler=self._handle_poll_failure,
+            )
             await self._poll_engine.start(db_path)
 
         log.info(
-            f"Local collector started — trap={self._trap_enabled}, poll={self._poll_enabled}"
+            f"Local collector started -- trap={self._trap_enabled}, poll={self._poll_enabled}"
         )
 
     async def stop(self) -> None:
@@ -67,7 +71,6 @@ class LocalCollector:
         log.info("Local collector stopped")
 
     def signal_reload(self) -> None:
-        """Propagate reload signal to the poll engine."""
         if self._poll_engine:
             self._poll_engine.signal_reload()
 
@@ -85,6 +88,8 @@ class LocalCollector:
             storage = get_storage()
             await storage.ingest_trap(trap)
             log.debug(f"Trap from {trap['source_ip']} stored")
+            if self._alert_engine:
+                await self._alert_engine.process_trap(trap)
         except Exception as e:
             log.error(f"Trap handler error: {e}")
 
@@ -92,5 +97,14 @@ class LocalCollector:
         try:
             storage = get_storage()
             await storage.ingest_poll_result(result)
+            if self._alert_engine:
+                await self._alert_engine.process_poll_result(result)
         except Exception as e:
             log.error(f"Poll result handler error: {e}")
+
+    async def _handle_poll_failure(self, device_id: int, device_ip: str) -> None:
+        if self._alert_engine:
+            try:
+                await self._alert_engine.process_poll_failure(device_id, device_ip)
+            except Exception as e:
+                log.debug(f"Poll failure alert error: {e}")
