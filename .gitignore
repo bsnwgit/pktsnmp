@@ -1,0 +1,73 @@
+# ─── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+lib64/
+.eggs/
+pip-wheel-metadata/
+share/python-wheels/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# ─── Runtime / secrets ────────────────────────────────────────────────────────
+config.yaml          # real config (use config.example.yaml as template)
+*.db                 # SQLite databases
+*.duckdb             # DuckDB databases
+*.duckdb.wal
+
+# Log files
+*.log
+logs/
+
+# ─── SSH keys / credentials ───────────────────────────────────────────────────
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+.env
+.env.*
+!.env.example
+
+# ─── Node / frontend ──────────────────────────────────────────────────────────
+node_modules/
+frontend/dist/       # built output — deploy scripts produce this on O2
+frontend/.vite/
+
+# ─── OS / editor ──────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ─── Test / coverage ──────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ─── Misc ─────────────────────────────────────────────────────────────────────
+*.bak
+*.orig
+fix_truncated.py     # one-off repair script, not part of the codebase
+todo_widget.html     # Claude working artifact, not source
