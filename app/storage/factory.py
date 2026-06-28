@@ -19,8 +19,8 @@ async def init_storage() -> None:
     global _storage
     cfg = get_settings()
 
-    # Read backend from settings table (may not exist yet on first run — default to duckdb)
-    backend = "duckdb"
+    # Read backend from settings table (may not exist yet on first run — default to sqlite)
+    backend = "sqlite"
     try:
         import json
         import aiosqlite
@@ -41,9 +41,15 @@ async def init_storage() -> None:
             user=cfg.clickhouse_user,
             password=cfg.clickhouse_password,
         )
-    else:
+    elif backend == "duckdb":
         from app.storage.duckdb import DuckDBStorage
         _storage = DuckDBStorage(db_path=str(cfg.duckdb_path))
+    else:
+        # Default: SQLite time-series (snmp_timeseries.db alongside pktsnmp.db)
+        from pathlib import Path
+        from app.storage.sqlite_ts import SQLiteStorage
+        ts_path = str(Path(cfg.db_path).parent / "snmp_timeseries.db")
+        _storage = SQLiteStorage(db_path=ts_path)
 
     try:
         await _storage.connect()

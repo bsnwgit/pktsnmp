@@ -663,12 +663,13 @@ export default function Settings() {
       {/* Storage */}
       {tab === 'storage' && (
         <Section title="Storage" onSave={storageSave.save} saving={storageSave.saving} saved={storageSave.saved} error={storageSave.error}>
-          <Field label="Backend" hint="DuckDB is the default; ClickHouse requires a separate installation. A service restart is required after changing this setting.">
+          <Field label="Backend" hint="SQLite is the default — stable, zero-config, sufficient for all device counts. DuckDB and ClickHouse are available for advanced analytics. A service restart is required after changing this setting.">
             <SelectInput
-              value={str('storage_backend', 'duckdb')}
+              value={str('storage_backend', 'sqlite')}
               onChange={v => set('storage_backend', v)}
               options={[
-                { value: 'duckdb', label: 'DuckDB (default)' },
+                { value: 'sqlite', label: 'SQLite (default)' },
+                { value: 'duckdb', label: 'DuckDB (analytical workloads)' },
                 { value: 'clickhouse', label: 'ClickHouse (requires separate install)' },
               ]}
             />
