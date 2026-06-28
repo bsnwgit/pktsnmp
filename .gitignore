@@ -66,6 +66,12 @@ Thumbs.db
 .coverage
 htmlcov/
 
+# ─── Deployment scripts (contain env-specific SSH keys/IPs) ──────────────────
+scripts/
+
+# ─── Claude project notes (deployment-specific) ───────────────────────────────
+CLAUDE.md
+
 # ─── Misc ─────────────────────────────────────────────────────────────────────
 *.bak
 *.orig

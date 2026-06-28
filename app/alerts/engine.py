@@ -246,7 +246,7 @@ class AlertEngine:
         async with aiosqlite.connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
-                "SELECT id, ip, name, status, last_seen FROM devices WHERE enabled=1"
+                "SELECT id, ip, name, status, last_seen, collector_id FROM devices WHERE enabled=1"
             ) as cur:
                 devices = [dict(r) for r in await cur.fetchall()]
         for rule in down_rules:
@@ -258,19 +258,28 @@ class AlertEngine:
                     continue
                 last_seen_raw = device.get("last_seen")
                 if not last_seen_raw:
-                    continue  # never polled -- skip
+                    continue  # never had data -- skip
+                # Remote collector devices (otelcol) are not polled locally.
+                # Use a 6x longer silence window and a corrected message so we
+                # don't falsely claim the local poller is failing for them.
+                is_remote = int(device.get("collector_id") or 1) != 1
+                effective_silence = silence_min * 6 if is_remote else silence_min
                 try:
                     ls_dt = datetime.fromisoformat(last_seen_raw.replace("Z", "+00:00"))
                     if ls_dt.tzinfo is None:
                         ls_dt = ls_dt.replace(tzinfo=timezone.utc)
-                    if (now - ls_dt).total_seconds() / 60 < silence_min:
+                    if (now - ls_dt).total_seconds() / 60 < effective_silence:
                         continue
                 except Exception:
                     continue
                 name = device.get("name") or device["ip"]
+                if is_remote:
+                    msg = f"Device {name} ({device['ip']}) — no data received from remote collector"
+                else:
+                    msg = f"Device {name} ({device['ip']}) is not responding to SNMP polls"
                 await self._fire(
                     rule,
-                    f"Device {name} ({device['ip']}) is not responding to SNMP polls",
+                    msg,
                     {
                         "device_ip": device["ip"],
                         "device_id": device["id"],
