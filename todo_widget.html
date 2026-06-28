@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>pktSNMP TODO</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f1117; color: #e5e7eb; min-height: 100vh; padding: 32px 16px; }
+  h1 { font-size: 1.4rem; font-weight: 700; color: #fff; margin-bottom: 4px; }
+  .subtitle { font-size: 0.8rem; color: #6b7280; margin-bottom: 32px; }
+  .phase { margin-bottom: 28px; }
+  .phase-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .phase-title { font-size: 0.9rem; font-weight: 600; color: #d1d5db; }
+  .pill { font-size: 0.7rem; padding: 2px 8px; border-radius: 999px; font-weight: 500; }
+  .pill-done    { background: #14532d; color: #86efac; }
+  .pill-pending { background: #1c1917; color: #78716c; border: 1px solid #292524; }
+  .pill-partial { background: #1c1107; color: #fbbf24; }
+  .items { display: flex; flex-direction: column; gap: 6px; }
+  .item { display: flex; align-items: flex-start; gap: 10px; padding: 9px 12px; border-radius: 8px; background: #111827; border: 1px solid #1f2937; font-size: 0.82rem; }
+  .item.done { opacity: 0.55; }
+  .icon { width: 18px; flex-shrink: 0; margin-top: 1px; }
+  .check { color: #22c55e; font-size: 14px; }
+  .circle { color: #374151; font-size: 14px; }
+  .spin { color: #f59e0b; font-size: 14px; }
+  .text { flex: 1; line-height: 1.45; }
+  .text b { color: #f3f4f6; font-weight: 600; }
+  .text small { color: #6b7280; font-size: 0.75rem; }
+  .progress-bar { height: 4px; background: #1f2937; border-radius: 2px; margin-bottom: 32px; overflow: hidden; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg, #2563eb, #7c3aed); border-radius: 2px; transition: width 0.4s; }
+  .stats { display: flex; gap: 20px; margin-bottom: 12px; }
+  .stat { font-size: 0.75rem; color: #6b7280; }
+  .stat b { color: #9ca3af; }
+</style>
+</head>
+<body>
+<h1>pktSNMP</h1>
+<p class="subtitle">SNMP Ingest &amp; Visualization Platform · Port 8767 · /mnt/software/pktsnmp</p>
+
+<div id="app"></div>
+
+<script>
+const phases = [
+  {
+    name: "Phase 1 — App Shell",
+    items: [
+      { done: true,  text: "<b>FastAPI backend scaffold</b> — main.py, auth, users, settings, system, backup, alerts stub" },
+      { done: true,  text: "<b>SNMP settings keys</b> — trap port, poll interval, version, community, v3 credentials" },
+      { done: true,  text: "<b>Storage layer</b> — DuckDB default, ClickHouse stub, factory" },
+      { done: true,  text: "<b>SQLite migrations</b> — users, settings, devices, alert_rules, alert_events, notification_log" },
+      { done: true,  text: "<b>JWT + httpOnly refresh token auth</b>" },
+      { done: true,  text: "<b>Okta SAML 2.0 SSO</b>" },
+      { done: true,  text: "<b>Notification channels</b> — Slack, Email, PagerDuty, Webhook, TraceCat" },
+      { done: true,  text: "<b>Backup scheduler</b> + export/import bundle" },
+      { done: true,  text: "<b>systemd service</b> — pktsnmp.service" },
+      { done: true,  text: "<b>React + TypeScript + Tailwind + Vite frontend</b>" },
+      { done: true,  text: "<b>Settings page</b> — General, SNMP, Storage, Backup, Auth, Notifications, Integrations, Users" },
+      { done: true,  text: "<b>Dashboard stub</b> — stat cards wired to /api/snmp/status" },
+      { done: true,  text: "<b>Alerts stub</b> — table ready, wired to /api/alerts/events" },
+      { done: true,  text: "<b>AI Assistant panel</b> — Claude, gated on anthropic_api_key" },
+      { done: true,  text: "<b>deploy_frontend.py</b> — Paramiko SSH, O2 Linux build" },
+      { done: true,  text: "<b>backup.py</b> — Windows 2-rotation zip" },
+    ]
+  },
+  {
+    name: "Phase 2 — SNMP Engine",
+    items: [
+      { done: false, text: "<b>Trap receiver</b> — UDP listener on configured port (pysnmp/easysnmp), write to snmp_traps" },
+      { done: false, text: "<b>Device registry</b> — CRUD /api/snmp/devices + Devices tab in Settings" },
+      { done: false, text: "<b>Polling engine</b> — asyncio loop, per-device OIDs, snmp_poll_results, device up/down state" },
+      { done: false, text: "<b>OID catalog</b> — common OID names, custom label mappings per device" },
+    ]
+  },
+  {
+    name: "Phase 3 — Storage Implementation",
+    items: [
+      { done: false, text: "<b>DuckDB</b> — implement ingest_trap, ingest_poll_result, query_traps, query_poll_history" },
+      { done: false, text: "<b>ClickHouse</b> — same methods for snmp_traps + snmp_poll_results" },
+      { done: false, text: "<b>Retention TTL</b> — hook retention_days_raw side effect into DuckDB/ClickHouse" },
+    ]
+  },
+  {
+    name: "Phase 4 — Alert Engine",
+    items: [
+      { done: false, text: "<b>Alert rules engine</b> — device_down, unknown_trap_source, threshold_breach, specific OID" },
+      { done: false, text: "<b>Alerts UI</b> — wire real events, ack/ack-all, filters, header badge count" },
+    ]
+  },
+  {
+    name: "Phase 5 — Dashboard",
+    items: [
+      { done: false, text: "<b>Trap timeline chart</b> — 24h bar chart" },
+      { done: false, text: "<b>Device status grid</b> — up/down/unknown + last-seen" },
+      { done: false, text: "<b>OID sparklines</b> — per-device poll history" },
+      { done: false, text: "<b>Top trap sources</b> — table by trap count" },
+      { done: false, text: "<b>Active alert count</b> — wire to real events" },
+    ]
+  },
+  {
+    name: "Phase 6 — Polish",
+    items: [
+      { done: false, text: "<b>Dark/light theme toggle</b>" },
+      { done: false, text: "<b>CSV export</b> — trap and poll history" },
+      { done: false, text: "<b>Per-device OID dashboard pages</b>" },
+      { done: false, text: "<b>Topology view</b> — low priority" },
+    ]
+  }
+]
+
+const totalItems = phases.reduce((s, p) => s + p.items.length, 0)
+const doneItems  = phases.reduce((s, p) => s + p.items.filter(i => i.done).length, 0)
+const pct = Math.round(doneItems / totalItems * 100)
+
+const app = document.getElementById('app')
+
+const statsEl = document.createElement('div')
+statsEl.className = 'stats'
+statsEl.innerHTML = `<span class="stat"><b>${doneItems}</b> / ${totalItems} tasks complete</span><span class="stat"><b>${pct}%</b> done</span>`
+app.appendChild(statsEl)
+
+const bar = document.createElement('div')
+bar.className = 'progress-bar'
+bar.innerHTML = `<div class="progress-fill" style="width:${pct}%"></div>`
+app.appendChild(bar)
+
+phases.forEach(phase => {
+  const doneCount = phase.items.filter(i => i.done).length
+  const total     = phase.items.length
+  const allDone   = doneCount === total
+  const noDone    = doneCount === 0
+  const pillClass = allDone ? 'pill-done' : noDone ? 'pill-pending' : 'pill-partial'
+  const pillText  = allDone ? `✓ ${total}/${total}` : `${doneCount}/${total}`
+
+  const ph = document.createElement('div')
+  ph.className = 'phase'
+  ph.innerHTML = `
+    <div class="phase-header">
+      <span class="phase-title">${phase.name}</span>
+      <span class="pill ${pillClass}">${pillText}</span>
+    </div>
+    <div class="items">
+      ${phase.items.map(item => `
+        <div class="item ${item.done ? 'done' : ''}">
+          <span class="icon">${item.done ? '<span class="check">✓</span>' : '<span class="circle">○</span>'}</span>
+          <span class="text">${item.text}</span>
+        </div>
+      `).join('')}
+    </div>
+  `
+  app.appendChild(ph)
+})
+</script>
+</body>
+</html>
