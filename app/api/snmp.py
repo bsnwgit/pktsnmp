@@ -54,6 +54,7 @@ async def _get_collector_by_token(token: str, db: aiosqlite.Connection) -> dict 
 
 
 async def collector_auth(
+    request: Request,
     credentials: Annotated[Optional[HTTPAuthorizationCredentials], Security(_collector_bearer)] = None,
     db: aiosqlite.Connection = Depends(get_db),
 ) -> dict:
@@ -61,7 +62,29 @@ async def collector_auth(
         raise HTTPException(status_code=401, detail="Collector token required")
     collector = await _get_collector_by_token(credentials.credentials, db)
     if not collector:
+        # Track failure — match inbound IP to a collector so the UI can surface it
+        client_ip = request.client.host if request.client else None
+        if client_ip:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT id FROM collectors WHERE ip=? OR ssh_host=?", (client_ip, client_ip)
+            ) as cur:
+                matched = await cur.fetchone()
+            if matched:
+                await db.execute(
+                    "UPDATE collectors SET auth_failure_count = auth_failure_count + 1, "
+                    "last_auth_failure_at = datetime('now'), updated_at = datetime('now') WHERE id=?",
+                    (matched["id"],),
+                )
+                await db.commit()
         raise HTTPException(status_code=401, detail="Invalid collector token")
+    # Good auth — reset any lingering failure state
+    await db.execute(
+        "UPDATE collectors SET auth_failure_count = 0, last_auth_failure_at = NULL, "
+        "updated_at = datetime('now') WHERE id=?",
+        (collector["id"],),
+    )
+    await db.commit()
     return collector
 
 
@@ -75,10 +98,39 @@ _COLLECTOR_SSH_FIELDS = (
 
 
 def _mask_collector(collector: dict) -> dict:
+    from datetime import datetime, timezone
     d = dict(collector)
     for field in _SSH_SECRET_FIELDS:
         if d.get(field):
             d[field] = _MASK          # "key saved" signal for the UI
+
+    # Derive effective_status from observed health signals (not stored, computed each time)
+    #   error   — recent auth failures (last_auth_failure_at within 15 min)
+    #   offline — no recent OTLP ingest (last_seen null or older than 10 min)
+    #   online  — data flowing normally
+    now = datetime.now(timezone.utc)
+
+    def _parse_utc(ts: str | None) -> datetime | None:
+        if not ts:
+            return None
+        try:
+            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            return None
+
+    failures = d.get("auth_failure_count") or 0
+    last_fail = _parse_utc(d.get("last_auth_failure_at"))
+    last_seen = _parse_utc(d.get("last_seen"))
+
+    if failures > 0 and last_fail and (now - last_fail).total_seconds() < 900:
+        effective = "error"
+    elif last_seen and (now - last_seen).total_seconds() < 600:
+        effective = "online"
+    else:
+        effective = "offline"
+
+    d["effective_status"] = effective
     return d
 
 
@@ -208,7 +260,13 @@ async def snmp_status(_: CurrentUser, db: aiosqlite.Connection = Depends(get_db)
         down_devices = (await cur.fetchone())["down"]
     async with db.execute("SELECT COUNT(*) AS total FROM collectors") as cur:
         total_collectors = (await cur.fetchone())["total"]
-    async with db.execute("SELECT COUNT(*) AS online FROM collectors WHERE status='online'") as cur:
+    async with db.execute(
+        """SELECT COUNT(*) AS online FROM collectors
+           WHERE (auth_failure_count = 0 OR last_auth_failure_at IS NULL
+                  OR last_auth_failure_at < datetime('now', '-15 minutes'))
+             AND last_seen IS NOT NULL
+             AND last_seen >= datetime('now', '-10 minutes')"""
+    ) as cur:
         online_collectors = (await cur.fetchone())["online"]
     async with db.execute("SELECT COUNT(*) AS total FROM snmp_credentials") as cur:
         total_creds = (await cur.fetchone())["total"]
@@ -324,6 +382,7 @@ _COLLECTOR_SELECT = """
            ssh_key_enc, ssh_password_enc,
            otelcol_config_path, otelcol_service,
            sync_status, last_synced_at, last_sync_error,
+           auth_failure_count, last_auth_failure_at,
            created_at, updated_at
     FROM collectors
 """
@@ -884,7 +943,8 @@ async def ingest_otlp_v1_metrics(request: Request, collector: dict = Depends(col
 @router.post("/ingest/heartbeat", status_code=200)
 async def ingest_heartbeat(body: dict, collector: dict = Depends(collector_auth), db: aiosqlite.Connection = Depends(get_db)) -> dict:
     await db.execute(
-        "UPDATE collectors SET last_seen=datetime('now'), status='online', version=?, updated_at=datetime('now') WHERE id=?",
+        "UPDATE collectors SET last_seen=datetime('now'), status='online', version=?, "
+        "auth_failure_count=0, last_auth_failure_at=NULL, updated_at=datetime('now') WHERE id=?",
         (body.get("version"), collector["id"]),
     )
     await db.commit()
