@@ -248,6 +248,16 @@ export interface SnmpDevice {
   site: string
   snmp_version: string
   enabled: boolean
+  status: string
+  last_seen: string | null
+  ha_role: string | null
+  collector_id: number
+  collector_name: string | null
+  otelcol_label: string | null
+  otelcol_pipeline: string | null
+  poll_interval_override: number | null
+  credential_id: number | null
+  credential_name: string | null
 }
 
 export interface SnmpTrap {

@@ -17,20 +17,49 @@ interface Device {
   id: number; name: string; ip: string; site: string
   collector_id: number; collector_name?: string; credential_id: number | null
   credential_name?: string; cred_snmp_version?: string; cred_community?: string
-  otelcol_label: string | null; enabled: number; status: string; last_seen: string | null
+  device_snmp_version?: string | null; device_community?: string | null
+  otelcol_label: string | null; otelcol_pipeline: string | null
+  enabled: number; status: string; last_seen: string | null
   last_error: string | null; poll_interval_override: number | null
+  ha_role: string | null
 }
 
 interface DeviceFormState {
   name: string; ip: string; site: string
   collector_id: number; credential_id: number | ''
-  otelcol_label: string; enabled: boolean; poll_interval_override: string
+  otelcol_label: string; otelcol_pipeline: string
+  enabled: boolean; poll_interval_override: string
+  ha_role: string
 }
 
 const EMPTY_DEVICE: DeviceFormState = {
   name: '', ip: '', site: '',
   collector_id: 1, credential_id: '',
-  otelcol_label: '', enabled: true, poll_interval_override: '',
+  otelcol_label: '', otelcol_pipeline: '',
+  enabled: true, poll_interval_override: '',
+  ha_role: '',
+}
+
+const PIPELINE_OPTIONS = [
+  { value: '', label: '— none —' },
+  { value: 'metrics/switch',   label: 'metrics/switch' },
+  { value: 'metrics/firewall', label: 'metrics/firewall' },
+  { value: 'metrics/snmp',     label: 'metrics/snmp' },
+]
+
+const HA_BADGE: Record<string, string> = {
+  active:  'bg-blue-900/40 text-blue-300 border-blue-700/50',
+  passive: 'bg-amber-900/40 text-amber-300 border-amber-700/50',
+}
+
+function HaBadge({ role }: { role: string | null }) {
+  if (!role) return null
+  const cls = HA_BADGE[role] ?? 'bg-gray-800 text-gray-400 border-gray-700'
+  return (
+    <span className={`ml-1.5 text-[10px] font-medium border rounded px-1.5 py-0.5 ${cls}`}>
+      HA {role}
+    </span>
+  )
 }
 
 function DeviceFormModal({ device, collectors, credentials, onClose, onSaved }: {
@@ -47,8 +76,10 @@ function DeviceFormModal({ device, collectors, credentials, onClose, onSaved }: 
       collector_id: device!.collector_id,
       credential_id: device!.credential_id ?? '',
       otelcol_label: device!.otelcol_label ?? '',
+      otelcol_pipeline: device!.otelcol_pipeline ?? '',
       enabled: !!device!.enabled,
       poll_interval_override: device!.poll_interval_override?.toString() ?? '',
+      ha_role: device!.ha_role ?? '',
     } : { ...EMPTY_DEVICE }
   )
   const [saving, setSaving]   = useState(false)
@@ -71,7 +102,9 @@ function DeviceFormModal({ device, collectors, credentials, onClose, onSaved }: 
       credential_id: Number(form.credential_id),
       poll_interval_override: form.poll_interval_override ? parseInt(form.poll_interval_override) : null,
       otelcol_label: form.otelcol_label || null,
+      otelcol_pipeline: form.otelcol_pipeline || null,
       enabled: form.enabled,
+      ha_role: form.ha_role || null,
     }
     try {
       const url = editing ? `/api/snmp/devices/${device!.id}` : '/api/snmp/devices'
@@ -134,14 +167,14 @@ function DeviceFormModal({ device, collectors, credentials, onClose, onSaved }: 
               <option value="">— select credential —</option>
               {credentials.map(c => (
                 <option key={c.id} value={c.id}>
-                  {c.name} ({c.snmp_version}{c.snmp_version !== 'v3' ? ` / ${c.community}` : ` / ${c.security_level}`})
+                  {c.name} ({c.snmp_version}{c.snmp_version === 'v3' ? ` / ${c.security_level}` : ''})
                 </option>
               ))}
             </select>
             {selectedCred && (
               <div className="mt-1.5 flex flex-wrap gap-1.5">
                 <span className="text-xs bg-blue-900/30 text-blue-300 border border-blue-700/40 rounded px-2 py-0.5">{selectedCred.snmp_version}</span>
-                {selectedCred.snmp_version !== 'v3' && <span className="text-xs bg-gray-800 text-gray-300 border border-gray-700 rounded px-2 py-0.5 font-mono">{selectedCred.community}</span>}
+                {selectedCred.snmp_version !== 'v3' && <span className="text-xs bg-gray-800 text-gray-400 border border-gray-700 rounded px-2 py-0.5 font-mono tracking-widest">••••••••</span>}
                 {selectedCred.snmp_version === 'v3' && <span className="text-xs bg-gray-800 text-gray-300 border border-gray-700 rounded px-2 py-0.5">{selectedCred.security_level}</span>}
                 {selectedCred.description && <span className="text-xs text-gray-500">{selectedCred.description}</span>}
               </div>
@@ -157,19 +190,42 @@ function DeviceFormModal({ device, collectors, credentials, onClose, onSaved }: 
               <p className="text-xs text-gray-500 mt-0.5">Matches SNMP/LABEL in otelcol metric names</p>
             </div>
             <div>
-              <label className="text-xs text-gray-400 block mb-1">Poll interval override (s)</label>
-              <input type="number" value={form.poll_interval_override} onChange={e => setF('poll_interval_override', e.target.value)}
-                placeholder="60 (use global default)"
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+              <label className="text-xs text-gray-400 block mb-1">otelcol pipeline</label>
+              <select value={form.otelcol_pipeline} onChange={e => setF('otelcol_pipeline', e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500">
+                {PIPELINE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+              <p className="text-xs text-gray-500 mt-0.5">Pipeline this device is added to on Sync</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button type="button" onClick={() => setF('enabled', !form.enabled)}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${form.enabled ? 'bg-blue-600' : 'bg-gray-700'}`}>
-              <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${form.enabled ? 'translate-x-6' : 'translate-x-1'}`} />
-            </button>
-            <label className="text-sm text-gray-300">Enabled</label>
+          <div>
+            <label className="text-xs text-gray-400 block mb-1">Poll interval override (s)</label>
+            <input type="number" value={form.poll_interval_override} onChange={e => setF('poll_interval_override', e.target.value)}
+              placeholder="60 (use global default)"
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">HA role</label>
+              <select value={form.ha_role} onChange={e => setF('ha_role', e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500">
+                <option value="">— none —</option>
+                <option value="active">Active</option>
+                <option value="passive">Passive (standby)</option>
+              </select>
+              <p className="text-xs text-gray-500 mt-0.5">Passive nodes may not respond to SNMP polls</p>
+            </div>
+            <div className="flex items-end pb-1">
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => setF('enabled', !form.enabled)}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${form.enabled ? 'bg-blue-600' : 'bg-gray-700'}`}>
+                  <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${form.enabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                </button>
+                <label className="text-sm text-gray-300">Enabled</label>
+              </div>
+            </div>
           </div>
 
           {error && <p className="text-xs text-red-400">{error}</p>}
@@ -258,9 +314,16 @@ export default function Devices() {
     return d.name.toLowerCase().includes(q) || d.ip.includes(q) || (d.site ?? '').toLowerCase().includes(q)
   })
 
-  const statusDot = (s: string, enabled: number) => {
-    if (!enabled) return 'bg-gray-600'
-    return s === 'up' ? 'bg-green-400' : s === 'down' ? 'bg-red-400' : 'bg-gray-500'
+  const statusDot = (d: Device) => {
+    if (!d.enabled) return 'bg-gray-600'
+    if (d.ha_role === 'passive') return 'bg-amber-400'
+    return d.status === 'up' ? 'bg-green-400' : d.status === 'down' ? 'bg-red-400' : 'bg-gray-500'
+  }
+
+  const statusLabel = (d: Device) => {
+    if (!d.enabled) return 'disabled'
+    if (d.ha_role === 'passive') return 'standby'
+    return d.status
   }
 
   const fmtRelative = (ts: string | null) => {
@@ -323,7 +386,10 @@ export default function Devices() {
               {displayed.map(d => (
                 <tr key={d.id} className="hover:bg-gray-800/30 transition-colors">
                   <td className="px-5 py-3">
-                    <p className={`text-sm font-medium ${d.enabled ? 'text-white' : 'text-gray-500'}`}>{d.name}</p>
+                    <div className="flex items-center flex-wrap gap-x-1">
+                      <p className={`text-sm font-medium ${d.enabled ? 'text-white' : 'text-gray-500'}`}>{d.name}</p>
+                      <HaBadge role={d.ha_role} />
+                    </div>
                     {d.site && <p className="text-xs text-gray-500">{d.site}</p>}
                   </td>
                   <td className="px-5 py-3 font-mono text-gray-300 text-xs hidden sm:table-cell">{d.ip}</td>
@@ -333,11 +399,13 @@ export default function Devices() {
                   <td className="px-5 py-3 text-gray-400 text-xs hidden lg:table-cell">{d.credential_name ?? '—'}</td>
                   <td className="px-5 py-3">
                     <span className="flex items-center gap-1.5 text-xs">
-                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${statusDot(d.status, d.enabled)}`}></span>
-                      <span className="text-gray-300 capitalize">{d.enabled ? d.status : 'disabled'}</span>
+                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${statusDot(d)}`}></span>
+                      <span className="text-gray-300 capitalize">{statusLabel(d)}</span>
                     </span>
                   </td>
-                  <td className="px-5 py-3 text-gray-400 text-xs hidden xl:table-cell">{fmtRelative(d.last_seen)}</td>
+                  <td className="px-5 py-3 text-gray-400 text-xs hidden xl:table-cell">
+                    {d.last_seen ? new Date(d.last_seen.endsWith('Z') ? d.last_seen : d.last_seen + 'Z').toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '—'}
+                  </td>
                   <td className="px-5 py-3">
                     <div className="flex items-center gap-3 justify-end">
                       <button onClick={() => setModal(d)} className="text-xs text-gray-400 hover:text-blue-400 transition-colors">Edit</button>
