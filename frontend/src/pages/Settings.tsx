@@ -635,13 +635,14 @@ export default function Settings() {
           )}
 
           <div className="pt-4 pb-1">
-            <p className="text-xs font-semibold text-white uppercase tracking-wider">Polling Engine</p>
+            <p className="text-xs font-semibold text-white uppercase tracking-wider">Local Polling Engine</p>
+            <p className="text-xs text-gray-500 mt-0.5">Controls only the built-in poller on this server — does not affect remote otelcol collectors</p>
           </div>
-          <Field label="Enable polling" hint="Actively poll registered devices for OID values">
+          <Field label="Enable local polling" hint="Run the built-in poll engine on this server (O2). Remote collectors are unaffected.">
             <Toggle value={bool('snmp_poll_enabled')} onChange={v => set('snmp_poll_enabled', v)} />
           </Field>
           {bool('snmp_poll_enabled') && (
-            <Field label="Poll interval" hint="Seconds between poll cycles">
+            <Field label="Poll interval" hint="Seconds between local poll cycles">
               <div className="flex items-center gap-3">
                 <NumberInput value={num('snmp_poll_interval_seconds', 300)} onChange={v => set('snmp_poll_interval_seconds', v)} min={10} max={86400} />
                 <span className="text-sm text-white">seconds</span>
@@ -651,7 +652,7 @@ export default function Settings() {
 
           <div className="py-4">
             <p className="text-xs text-blue-400 bg-blue-900/20 border border-blue-700/40 rounded-lg px-3 py-2">
-              Trap receiver and local polling engine settings. Remote collectors (otelcol) are managed under Collectors in the left nav. Changes take effect after a service restart.
+              Trap receiver and local polling engine settings only. Remote otelcol collectors (medical, dental) operate independently and are managed under <span className="font-semibold">Collectors</span> in the left nav. Changes here take effect after a service restart.
             </p>
           </div>
         </Section>
@@ -1264,7 +1265,7 @@ function CredentialFormModal({ cred, onClose, onSaved }: {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="text-xs text-gray-400 block mb-1">Name *</label>
-              <input value={form.name} onChange={e => setF('name', e.target.value)} required placeholder="SiteA-v2c"
+              <input value={form.name} onChange={e => setF('name', e.target.value)} required placeholder="e.g. v2c-medical, v3-dental-authPriv"
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
             </div>
             <div>
@@ -1356,11 +1357,17 @@ function CredentialFormModal({ cred, onClose, onSaved }: {
 }
 
 function CredentialsTab() {
+  const { user: me }                  = useAuth()
+  const isAdmin                       = me?.role === 'admin'
   const [credentials, setCredentials] = useState<Credential[]>([])
   const [loading, setLoading]         = useState(true)
   const [modal, setModal]             = useState<Credential | null | 'new'>(null)
   const [confirm, setConfirm]         = useState<Credential | null>(null)
   const [error, setError]             = useState('')
+  const [revealed, setRevealed]       = useState<Set<number>>(new Set())
+
+  const toggleReveal = (id: number) =>
+    setRevealed(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
 
   const authHeader = () => ({ Authorization: `Bearer ${getToken() ?? ''}`, 'Content-Type': 'application/json' })
 
@@ -1435,7 +1442,17 @@ function CredentialsTab() {
                     <span className={`text-xs px-2 py-0.5 rounded font-mono ${versionBadge(c.snmp_version)}`}>{c.snmp_version}</span>
                   </td>
                   <td className="px-5 py-3 text-gray-400 text-xs hidden sm:table-cell font-mono">
-                    {c.snmp_version !== 'v3' ? c.community : `${c.security_name || '—'} / ${c.security_level}`}
+                    {c.snmp_version !== 'v3' ? (
+                      <span className="flex items-center gap-2">
+                        <span>{revealed.has(c.id) ? c.community : '••••••••'}</span>
+                        {isAdmin && (
+                          <button onClick={() => toggleReveal(c.id)}
+                            className="text-[10px] text-gray-500 hover:text-blue-400 transition-colors font-sans">
+                            {revealed.has(c.id) ? 'hide' : 'view'}
+                          </button>
+                        )}
+                      </span>
+                    ) : `${c.security_name || '—'} / ${c.security_level}`}
                   </td>
                   <td className="px-5 py-3 text-gray-500 text-xs hidden md:table-cell">{c.description || '—'}</td>
                   <td className="px-5 py-3">

@@ -39,5 +39,8 @@ anthropic>=0.30.0
 # SNMP
 pysnmp-lextudio>=6.1.0
 
+# SSH (remote collector config push)
+paramiko>=3.0.0
+
 # Utilities
 python-dateutil>=2.9.0
