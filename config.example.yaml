@@ -1,0 +1,36 @@
+# pktSNMP configuration
+# Copy to config.yaml alongside the app, or set PKTSNMP_CONFIG=/path/to/config.yaml
+#
+# Most runtime settings (storage backend, retention, SNMP settings, notifications, etc.) are
+# managed via the Settings page in the UI and stored in SQLite.
+# This file only covers infrastructure/startup settings.
+
+# ── Server ────────────────────────────────────────────────────────────────────
+host: "0.0.0.0"
+port: 8767
+workers: 2
+debug: false
+
+# ── SQLite app database ────────────────────────────────────────────────────────
+db_path: "/mnt/software/pktsnmp/pktsnmp.db"
+
+# ── ClickHouse ────────────────────────────────────────────────────────────────
+clickhouse_host: "localhost"
+clickhouse_port: 9000
+clickhouse_database: "pktsnmp"
+clickhouse_user: "default"
+clickhouse_password: ""
+
+# ── DuckDB (default backend) ──────────────────────────────────────────────────
+duckdb_path: "/mnt/software/pktsnmp/snmp.duckdb"
+
+# ── JWT (CHANGE THIS in production — generate with: openssl rand -hex 32) ────
+secret_key: "CHANGE_ME_generate_with_openssl_rand_hex_32"
+
+# ── CORS (restrict to your actual origin in production) ──────────────────────
+cors_origins:
+  - "http://172.23.80.5:8767"
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+log_level: "info"
+log_file: "/mnt/software/logs/pktsnmp.log"
