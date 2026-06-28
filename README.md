@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="lockup-256h.png" alt="pktSNMP" height="80" />
+</p>
+
 # pktSNMP
 
 SNMP ingest management and visualization platform — part of the pkt suite. Receives SNMP traps and poll data from network devices, stores them in DuckDB or ClickHouse, and surfaces them through a React UI with alerting and an AI assistant.
@@ -513,3 +517,15 @@ pktsnmp/
 | pktDashboard | 8760 | Suite home / logo hosting |
 
 Logos for all pkt apps are served from `http://172.23.80.5:8760/logos/`.
+
+## Logos & Branding
+
+| File | Description |
+|---|---|
+| `lockup.svg` | Full SVG lockup (wordmark + icon) — preferred for docs |
+| `lockup-256h.png` | PNG lockup, 256 px tall |
+| `lockup-128h.png` | PNG lockup, 128 px tall |
+| `lockup-64h.png` | PNG lockup, 64 px tall |
+| `icon.svg` | Icon-only SVG |
+| `icon-512.png` … `icon-16.png` | Icon PNGs at 512 / 256 / 128 / 64 / 48 / 32 / 16 px |
+| `favicon.ico` | Browser favicon |
