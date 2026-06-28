@@ -52,7 +52,8 @@ async def lifespan(app: FastAPI):
     # Start alert engine
     from app.alerts.engine import AlertEngine
     engine = AlertEngine()
-    await engine.start()
+    await engine.start(settings.db_path)
+    app.state.alert_engine = engine
     log.info("Alert engine started")
 
     # Start alert event cleanup job
@@ -74,9 +75,9 @@ async def lifespan(app: FastAPI):
         await seed_catalog(_oid_db)
     log.info("OID catalog seeded")
 
-    # Start local SNMP collector
+    # Start local SNMP collector (wire in alert engine)
     from app.snmp.local_collector import LocalCollector
-    local_collector = LocalCollector()
+    local_collector = LocalCollector(alert_engine=engine)
     await local_collector.start(settings.db_path)
     app.state.local_collector = local_collector
     log.info("Local SNMP collector started")
@@ -176,7 +177,7 @@ if __name__ == "__main__":
                     _ssl_keyfile = _val if _val else None
         _conn.close()
     except Exception as _e:
-        log.warning(f"t read SSL settings from config DB: {_e}")
+        log.warning(f"Could not read SSL settings from config DB: {_e}")
 
     _uvicorn_kwargs = dict(
         host=settings.host,
