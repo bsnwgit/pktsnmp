@@ -1,17 +1,16 @@
 [Unit]
 Description=pktSNMP SNMP Ingest Management & Visualization Platform
-Documentation=https://github.com/vynedental/pktsnmp
 After=network.target clickhouse-server.service
 
 [Service]
 Type=simple
-User=ssh-user
-Group=ssh-user
-WorkingDirectory=/mnt/software/pktsnmp
+User=pktsnmp
+Group=pktsnmp
+WorkingDirectory=/opt/pktsnmp
 
-Environment=PKTSNMP_CONFIG=/mnt/software/pktsnmp/config.yaml
+Environment=PKTSNMP_CONFIG=/opt/pktsnmp/config.yaml
 
-ExecStart=/mnt/software/pktsnmp/venv/bin/uvicorn app.main:app \
+ExecStart=/opt/pktsnmp/venv/bin/uvicorn app.main:app \
     --host 0.0.0.0 \
     --port 8767 \
     --workers 1 \
@@ -23,8 +22,8 @@ RestartSec=5
 StartLimitInterval=60
 StartLimitBurst=3
 
-StandardOutput=append:/mnt/software/logs/pktsnmp.log
-StandardError=append:/mnt/software/logs/pktsnmp.log
+StandardOutput=append:/var/log/pktsnmp.log
+StandardError=append:/var/log/pktsnmp.log
 
 NoNewPrivileges=yes
 AmbientCapabilities=CAP_NET_BIND_SERVICE

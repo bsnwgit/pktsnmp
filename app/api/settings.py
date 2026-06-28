@@ -78,7 +78,7 @@ DEFAULTS: dict[str, Any] = {
 
     # General
     "app_name": "pktSNMP",
-    "base_url": "http://SERVER-IP:8767",
+    "base_url": "http://localhost:8767",
     "timezone": "UTC",
 
     # AI assistant

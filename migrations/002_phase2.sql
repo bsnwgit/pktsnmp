@@ -18,14 +18,9 @@ CREATE TABLE IF NOT EXISTS collectors (
     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Seed the built-in local collector (always id=1)
 INSERT OR IGNORE INTO collectors (id, name, description, ip)
-VALUES (1, 'local', 'Built-in local collector (in-process on O2)', 'SERVER-IP');
-
-INSERT OR IGNORE INTO collectors (id, name, description, ip)
-VALUES (2, 'medical', 'Medical otelcol collector', 'COLLECTOR-1-IP');
-
-INSERT OR IGNORE INTO collectors (id, name, description, ip)
-VALUES (3, 'dental', 'Dental otelcol collector', 'COLLECTOR-2-IP');
+VALUES (1, 'local', 'Built-in local collector (in-process on this server)', '127.0.0.1');
 
 -- Expand devices table (ALTER TABLE — each column added individually)
 ALTER TABLE devices ADD COLUMN collector_id INTEGER REFERENCES collectors(id) DEFAULT 1;
@@ -41,21 +36,7 @@ ALTER TABLE devices ADD COLUMN auth_key_enc TEXT;
 ALTER TABLE devices ADD COLUMN priv_protocol TEXT NOT NULL DEFAULT 'AES128';
 ALTER TABLE devices ADD COLUMN priv_key_enc TEXT;
 
--- Seed live devices (medical collector)
-INSERT OR IGNORE INTO devices (name, ip, site, snmp_version, community, collector_id, otelcol_label, enabled)
-VALUES
-  ('QTS SW1',     'DEVICE-IP-1',   'medical', 'v3',  '',                 2, 'QTS/SW1',      1),
-  ('QTS FW3',     'DEVICE-IP-2',  'medical', 'v2c', 'REDACTED_COMMUNITY_STRING', 2, 'QTS/FW3',      1),
-  ('QTS FW4',     'DEVICE-IP-3',  'medical', 'v2c', 'REDACTED_COMMUNITY_STRING', 2, 'QTS/FW4',      1),
-  ('OneNeck SW1', 'DEVICE-IP-4', 'medical', 'v2c', 'REDACTED_COMMUNITY_STRING', 2, 'ON/SW1',       1),
-  ('OneNeck FW1', 'DEVICE-IP-5',  'medical', 'v2c', 'REDACTED_COMMUNITY_STRING', 2, 'OneNeck/FW1',  1),
-  ('OneNeck FW2', 'DEVICE-IP-6',  'medical', 'v2c', 'REDACTED_COMMUNITY_STRING', 2, 'OneNeck/FW2',  1);
-
--- Seed live devices (dental collector)
-INSERT OR IGNORE INTO devices (name, ip, site, snmp_version, community, collector_id, otelcol_label, enabled)
-VALUES
-  ('AWS AZ2A', 'DEVICE-IP-7', 'dental', 'v2c', 'REDACTED_COMMUNITY_STRING', 3, 'AWS/AZ2A', 1),
-  ('AWS AZ2B', 'DEVICE-IP-8', 'dental', 'v2c', 'REDACTED_COMMUNITY_STRING', 3, 'AWS/AZ2B', 1);
+-- No devices seeded by migration — add devices via the UI or via your own seed script.
 
 -- OID catalog
 CREATE TABLE IF NOT EXISTS oid_catalog (

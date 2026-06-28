@@ -12,7 +12,7 @@ workers: 2
 debug: false
 
 # ── SQLite app database ────────────────────────────────────────────────────────
-db_path: "/mnt/software/pktsnmp/pktsnmp.db"
+db_path: "/opt/pktsnmp/pktsnmp.db"
 
 # ── ClickHouse ────────────────────────────────────────────────────────────────
 clickhouse_host: "localhost"
@@ -22,15 +22,15 @@ clickhouse_user: "default"
 clickhouse_password: ""
 
 # ── DuckDB (default backend) ──────────────────────────────────────────────────
-duckdb_path: "/mnt/software/pktsnmp/snmp.duckdb"
+duckdb_path: "/opt/pktsnmp/snmp.duckdb"
 
 # ── JWT (CHANGE THIS in production — generate with: openssl rand -hex 32) ────
 secret_key: "CHANGE_ME_generate_with_openssl_rand_hex_32"
 
 # ── CORS (restrict to your actual origin in production) ──────────────────────
 cors_origins:
-  - "http://SERVER-IP:8767"
+  - "http://localhost:8767"
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 log_level: "info"
-log_file: "/mnt/software/logs/pktsnmp.log"
+log_file: "/var/log/pktsnmp.log"
