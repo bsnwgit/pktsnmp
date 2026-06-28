@@ -29,6 +29,10 @@ interface Collector {
   sync_status: string | null       // 'synced' | 'error' | 'unknown' | null
   last_synced_at: string | null
   last_sync_error: string | null
+  // Health / 3-state status (derived server-side)
+  effective_status: string          // 'online' | 'offline' | 'error'
+  auth_failure_count: number
+  last_auth_failure_at: string | null
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -44,7 +48,10 @@ const fmtRelative = (ts: string | null) => {
 }
 
 const statusDot = (s: string) =>
-  s === 'online' ? 'bg-green-400' : s === 'offline' ? 'bg-red-400' : 'bg-gray-500'
+  s === 'online' ? 'bg-green-400' : s === 'error' ? 'bg-amber-400' : 'bg-red-400'
+
+const statusText = (s: string) =>
+  s === 'online' ? 'text-green-400' : s === 'error' ? 'text-amber-400' : 'text-red-400'
 
 function SyncBadge({ status, error }: { status: string | null; error: string | null }) {
   if (!status || status === 'unknown') return <span className="text-xs text-gray-600">—</span>
@@ -553,10 +560,23 @@ export default function Collectors() {
                   </td>
                   <td className="px-5 py-3 font-mono text-gray-300 text-xs hidden sm:table-cell">{c.ip ?? '—'}</td>
                   <td className="px-5 py-3">
-                    <span className="flex items-center gap-1.5 text-xs">
-                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${statusDot(c.status)}`}></span>
-                      <span className="text-gray-300 capitalize">{c.status}</span>
-                    </span>
+                    <div className="text-xs">
+                      <span className="flex items-center gap-1.5">
+                        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${statusDot(c.effective_status)}`}></span>
+                        <span className={`capitalize ${statusText(c.effective_status)}`}>{c.effective_status}</span>
+                      </span>
+                      {c.effective_status === 'error' && c.auth_failure_count > 0 && (
+                        <p className="text-amber-600 mt-0.5 ml-3.5"
+                           title={c.last_auth_failure_at ? `Last at: ${c.last_auth_failure_at}` : ''}>
+                          Auth failures: {c.auth_failure_count}
+                        </p>
+                      )}
+                      {c.effective_status === 'offline' && (
+                        <p className="text-gray-600 mt-0.5 ml-3.5">
+                          {c.last_seen ? `Last: ${fmtRelative(c.last_seen)}` : 'Never connected'}
+                        </p>
+                      )}
+                    </div>
                   </td>
                   <td className="px-5 py-3 hidden md:table-cell">
                     <div>
