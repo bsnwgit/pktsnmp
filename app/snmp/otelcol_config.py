@@ -50,8 +50,8 @@ def _sum(oid: str, description: str, unit: str) -> dict:
         "column_oids": [{"attributes": _COL_ATTRS, "oid": oid}],
         "description": description,
         "sum": {
-            "aggregation_temporality": "cumulative",
-            "mono": True,
+            "aggregation": "cumulative",
+            "monotonic": True,
             "value_type": "int",
         },
         "unit": unit,
