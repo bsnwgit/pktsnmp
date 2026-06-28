@@ -115,24 +115,26 @@ function TrapTimeline({ data }: { data: Array<{ hour: string; count: number }> }
 
 // ── Device status grid ────────────────────────────────────────────────────────
 
-const STATUS_DOT: Record<string, string> = {
-  up:      'bg-green-500',
-  down:    'bg-red-500',
-  unknown: 'bg-gray-600',
+const HA_BADGE: Record<string, string> = {
+  active:  'bg-blue-900/40 text-blue-300 border-blue-700/50',
+  passive: 'bg-amber-900/40 text-amber-300 border-amber-700/50',
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  up:      'text-green-400',
-  down:    'text-red-400',
-  unknown: 'text-gray-500',
+function devDot(d: SnmpDevice): string {
+  if (!d.enabled) return 'bg-gray-600'
+  if (d.ha_role === 'passive') return 'bg-amber-400'
+  const m: Record<string, string> = { up: 'bg-green-500', down: 'bg-red-500' }
+  return m[d.status] ?? 'bg-gray-600'
 }
 
-interface DeviceWithStatus extends SnmpDevice {
-  status?: string
-  last_seen?: string
+function devLabel(d: SnmpDevice): { text: string; cls: string } {
+  if (!d.enabled) return { text: 'disabled', cls: 'text-gray-600' }
+  if (d.ha_role === 'passive') return { text: 'standby', cls: 'text-amber-400' }
+  const m: Record<string, string> = { up: 'text-green-400', down: 'text-red-400' }
+  return { text: d.status ?? 'unknown', cls: m[d.status] ?? 'text-gray-500' }
 }
 
-function DeviceGrid({ devices, loading }: { devices: DeviceWithStatus[]; loading: boolean }) {
+function DeviceGrid({ devices, loading }: { devices: SnmpDevice[]; loading: boolean }) {
   const navigate = useNavigate()
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
@@ -155,16 +157,27 @@ function DeviceGrid({ devices, loading }: { devices: DeviceWithStatus[]; loading
       ) : (
         <div className="divide-y divide-gray-800/50">
           {devices.map(d => {
-            const st = d.status ?? 'unknown'
+            const { text: stText, cls: stCls } = devLabel(d)
             return (
               <div key={d.id} className="px-5 py-3 flex items-center gap-3 hover:bg-gray-800/30 transition-colors">
-                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${STATUS_DOT[st] ?? STATUS_DOT.unknown}`} />
+                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${devDot(d)}`} />
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm text-white truncate">{d.name || d.ip}</p>
-                  {d.name && <p className="text-xs text-gray-500">{d.ip}</p>}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <p className={`text-sm truncate ${d.enabled ? 'text-white' : 'text-gray-500'}`}>
+                      {d.name || d.ip}
+                    </p>
+                    {d.ha_role && (
+                      <span className={`text-[10px] font-medium border rounded px-1.5 py-0.5 flex-shrink-0 ${HA_BADGE[d.ha_role] ?? 'bg-gray-800 text-gray-400 border-gray-700'}`}>
+                        HA {d.ha_role}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    {d.site || d.collector_name || d.ip}
+                  </p>
                 </div>
                 <div className="flex-shrink-0 text-right">
-                  <p className={`text-xs font-medium capitalize ${STATUS_LABEL[st] ?? STATUS_LABEL.unknown}`}>{st}</p>
+                  <p className={`text-xs font-medium capitalize ${stCls}`}>{stText}</p>
                   {d.last_seen && (
                     <p className="text-xs text-gray-600">{fmtTime(d.last_seen)}</p>
                   )}
@@ -258,7 +271,7 @@ const EMPTY_DASH: SnmpDashboard = {
 export default function Dashboard() {
   const navigate = useNavigate()
   const [dash, setDash]       = useState<SnmpDashboard>(EMPTY_DASH)
-  const [devices, setDevices] = useState<DeviceWithStatus[]>([])
+  const [devices, setDevices] = useState<SnmpDevice[]>([])
   const [loading, setLoading] = useState(true)
 
   const load = async () => {
@@ -268,7 +281,7 @@ export default function Dashboard() {
         api.getSnmpDevices(),
       ])
       setDash(d)
-      setDevices(devs as DeviceWithStatus[])
+      setDevices(devs)
     } catch {}
     finally { setLoading(false) }
   }

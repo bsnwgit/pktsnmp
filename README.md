@@ -1,8 +1,12 @@
+<p align="center">
+  <img src="lockup-256h.png" alt="pktSNMP" height="80" />
+</p>
+
 # pktSNMP
 
 SNMP ingest management and visualization platform — part of the pkt suite. Receives SNMP traps and poll data from network devices, stores them in DuckDB or ClickHouse, and surfaces them through a React UI with alerting and an AI assistant.
 
-**Port:** `8767` &nbsp;|&nbsp; **App path (O2):** `/mnt/software/pktsnmp` &nbsp;|&nbsp; **Server:** O2 at `SERVER-IP`
+**Default port:** `8767`
 
 ---
 
@@ -23,6 +27,7 @@ SNMP ingest management and visualization platform — part of the pkt suite. Rec
 - [Backup & Restore](#backup--restore)
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
+- [Logos & Branding](#logos--branding)
 
 ---
 
@@ -30,7 +35,7 @@ SNMP ingest management and visualization platform — part of the pkt suite. Rec
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│                        O2 (SERVER-IP)                  │
+│                     pktSNMP server                       │
 │                                                          │
 │   pktsnmp.service  (uvicorn / FastAPI)  :8767            │
 │   ├── REST API  (app/api/)                               │
@@ -44,7 +49,7 @@ SNMP ingest management and visualization platform — part of the pkt suite. Rec
 │   DuckDB  snmp.duckdb   ← snmp_traps, snmp_poll_results │
 │   (or ClickHouse, switchable in Settings → Storage)      │
 │                                                          │
-│   React SPA  /mnt/software/pktsnmp/frontend/dist/       │
+│   React SPA  /opt/pktsnmp/frontend/dist/                 │
 │   served by uvicorn StaticFiles                          │
 └──────────────────────────────────────────────────────────┘
          ▲                        ▲
@@ -52,8 +57,8 @@ SNMP ingest management and visualization platform — part of the pkt suite. Rec
          │                        │
 ┌────────────────┐      ┌─────────────────────┐
 │ otelcol        │      │ Network devices      │
-│ (medical host) │      │ (routers, switches,  │
-│ (dental host)  │      │  firewalls)          │
+│ (remote        │      │ (routers, switches,  │
+│  collectors)   │      │  firewalls)          │
 └────────────────┘      └─────────────────────┘
 ```
 
@@ -73,27 +78,27 @@ SNMP ingest management and visualization platform — part of the pkt suite. Rec
 
 ## Prerequisites
 
-**On O2 (server):**
+**On the server:**
 - Python 3.11+
 - Node.js 20+ via NVM (for frontend builds)
 - Git
 - Optional: ClickHouse (if switching storage backend)
 
-**On your Windows workstation:**
+**On your workstation (Windows):**
 - Python 3.x + Paramiko (`pip install paramiko`)
-- SSH key `your-key.pem` in a known path
-- **Do not install Node on Windows** — the `node_modules` tree is OS-specific; builds must run on O2
+- SSH key for the server in a known path
+- **Do not install Node on Windows** — the `node_modules` tree is OS-specific; builds must run on the server
 
 ---
 
 ## Fresh Install
 
-### 1 — Clone the repo on O2
+### 1 — Clone the repo on the server
 
 ```bash
-ssh -i your-key.pem ssh-user@SERVER-IP
-cd /mnt/software
-git clone git@github.com:bsnwgit/pktsnmp.git pktsnmp
+ssh -i your-key.pem user@<server-ip>
+cd /opt
+git clone git@github.com:<org>/pktsnmp.git pktsnmp
 cd pktsnmp
 ```
 
@@ -119,9 +124,9 @@ Edit `config.yaml` at minimum:
 #   openssl rand -hex 32
 secret_key: "PASTE_OUTPUT_HERE"
 
-db_path: "/mnt/software/pktsnmp/pktsnmp.db"
-duckdb_path: "/mnt/software/pktsnmp/snmp.duckdb"
-log_file: "/mnt/software/logs/pktsnmp.log"
+db_path: "/opt/pktsnmp/pktsnmp.db"
+duckdb_path: "/opt/pktsnmp/snmp.duckdb"
+log_file: "/var/log/pktsnmp.log"
 ```
 
 ### 4 — Database migrations
@@ -149,34 +154,34 @@ See [Frontend Build & Deploy](#frontend-build--deploy) below.
 
 ### 7 — First login
 
-Navigate to `http://SERVER-IP:8767` and log in with the default admin credentials set during installation. **Change the password immediately** in Settings → Users.
+Navigate to `http://<server-ip>:8767` and log in with the default admin credentials set during installation. **Change the password immediately** in Settings → Users.
 
 ---
 
 ## Frontend Build & Deploy
 
-The frontend **must be built on O2** — the `node_modules` directory contains Linux-native binaries that won't cross-compile from Windows.
+The frontend **must be built on the Linux server** — the `node_modules` directory contains Linux-native binaries that won't cross-compile from Windows.
 
 ### Automated (recommended)
 
 From your Windows workstation:
 
 ```bash
-# Set your key path in the script first
+# Edit the key path and server IP in the script first
 python scripts/deploy_frontend.py
 ```
 
 The script will:
-1. SSH to O2 via Paramiko
+1. SSH to the server via Paramiko
 2. Pull latest changes from git
 3. Run `npm ci` (if `package.json` changed)
 4. Run `npm run build`
 5. Restart `pktsnmp.service`
 
-### Manual (on O2)
+### Manual (on the server)
 
 ```bash
-cd /mnt/software/pktsnmp/frontend
+cd /opt/pktsnmp/frontend
 source ~/.nvm/nvm.sh
 nvm use 20
 npm ci
@@ -194,45 +199,44 @@ pktSNMP receives SNMP data two ways:
 
 ### Local collector (built-in)
 
-Runs in-process on O2. Polls all devices assigned to `collector_id=1` via pysnmp, and listens for raw SNMP traps on UDP 162.
+Runs in-process on the server. Polls all devices assigned to `collector_id=1` via pysnmp, and listens for raw SNMP traps on UDP 162.
 
 - Requires `AmbientCapabilities=CAP_NET_BIND_SERVICE` (already set in `pktsnmp.service`)
 - Configure via **Settings → SNMP**: enable trap receiver, set poll interval
-- Add devices via **Settings → Devices** and assign Collector = `local`
+- Add devices via **Devices** and assign Collector = `local`
+- **Does not affect remote otelcol collectors** — remote collectors operate independently
 
 ### Remote otelcol collectors
 
-Existing OpenTelemetry Collector instances redirected to push OTLP HTTP JSON to pktSNMP.
-
-**Example infrastructure:**
-
-| Collector | Host | Devices |
-|---|---|---|
-| Medical | COLLECTOR-1-IP | SiteA SW1 (v3), SiteA FW3/FW4 (v2c), SiteB SW1/FW1/FW2 (v2c) |
-| Dental | COLLECTOR-2-IP | AWS AZ2A (DEVICE-IP-7), AWS AZ2B (DEVICE-IP-8) |
-
-**One-time setup (run from Windows):**
-
-```bash
-python scripts/update_collector_medical.py
-python scripts/update_collector_dental.py
-```
-
-Each script generates a bearer token, writes it to SQLite, updates the otelcol config on the remote host, and restarts the service.
+Existing OpenTelemetry Collector instances that push SNMP data to pktSNMP via OTLP HTTP. Add and manage them in **Settings → Collectors**.
 
 **Minimal otelcol exporter block:**
 
 ```yaml
 exporters:
   otlphttp/pktsnmp:
-    endpoint: "http://SERVER-IP:8767"
+    endpoint: "http://<server-ip>:8767"
     headers:
-      Authorization: "Bearer YOUR_TOKEN_HERE"
+      Authorization: "Bearer YOUR_COLLECTOR_TOKEN"
     tls:
       insecure: true
 ```
 
-Add `otlphttp/pktsnmp` to your SNMP pipeline's exporters list. See `docs/collector-setup.md` for full instructions.
+Add `otlphttp/pktsnmp` to your SNMP pipeline's exporters list.
+
+**Syncing collector config from the UI:**
+
+1. Go to **Collectors** → select a remote collector
+2. Configure SSH credentials (key or password) under the SSH tab
+3. Click **Sync** — pktSNMP will SSH to the collector, patch its otelcol YAML with the correct SNMP receiver blocks (community strings, device IPs, OIDs), and restart otelcol
+
+### SNMP credentials
+
+Credentials are managed in **Settings → Credentials**. Naming convention: `<version>-<collector-name>[-<security-level>]` — e.g. `v2c-site-a`, `v3-datacenter-authPriv`.
+
+- Community strings are masked by default in the UI (`••••••••`)
+- Admins can reveal community strings via a per-row view/hide toggle
+- Credentials are stored encrypted at rest (Fernet)
 
 ### Data flow
 
@@ -258,13 +262,13 @@ All startup/infrastructure settings live in `config.yaml`. Runtime settings (sto
 | `port` | `8767` | HTTP port |
 | `workers` | `2` | uvicorn workers |
 | `secret_key` | — | JWT signing secret — **must change** |
-| `db_path` | `/mnt/software/pktsnmp/pktsnmp.db` | SQLite path |
-| `duckdb_path` | `/mnt/software/pktsnmp/snmp.duckdb` | DuckDB path |
+| `db_path` | `/opt/pktsnmp/pktsnmp.db` | SQLite path |
+| `duckdb_path` | `/opt/pktsnmp/snmp.duckdb` | DuckDB path |
 | `clickhouse_host` | `localhost` | ClickHouse host (if used) |
 | `clickhouse_database` | `pktsnmp` | ClickHouse database name |
 | `log_level` | `info` | `debug` / `info` / `warning` / `error` |
-| `log_file` | `/mnt/software/logs/pktsnmp.log` | Log output path |
-| `cors_origins` | `["http://SERVER-IP:8767"]` | Allowed CORS origins |
+| `log_file` | `/var/log/pktsnmp.log` | Log output path |
+| `cors_origins` | `["http://localhost:8767"]` | Allowed CORS origins |
 
 ### SNMP settings (stored in SQLite, managed via UI)
 
@@ -272,7 +276,7 @@ All startup/infrastructure settings live in `config.yaml`. Runtime settings (sto
 |---|---|
 | `snmp_trap_enabled` | Enable trap receiver |
 | `snmp_trap_port` | Trap UDP port (default 162) |
-| `snmp_poll_enabled` | Enable local poll engine |
+| `snmp_poll_enabled` | Enable local poll engine (does not affect remote collectors) |
 | `snmp_poll_interval_seconds` | Default poll interval |
 | `snmp_version` | `v1` / `v2c` / `v3` |
 | `snmp_community` | Community string (v1/v2c) |
@@ -290,7 +294,7 @@ sudo systemctl status pktsnmp
 # Logs (live)
 sudo journalctl -u pktsnmp -f
 # or
-tail -f /mnt/software/logs/pktsnmp.log
+tail -f /var/log/pktsnmp.log
 
 # Restart
 sudo systemctl restart pktsnmp
@@ -304,16 +308,16 @@ sudo systemctl start pktsnmp
 
 ## Upgrading
 
-From your Windows workstation:
+From your workstation:
 
 ```bash
 python scripts/deploy_frontend.py
 ```
 
-Or manually on O2:
+Or manually on the server:
 
 ```bash
-cd /mnt/software/pktsnmp
+cd /opt/pktsnmp
 git pull
 source venv/bin/activate
 pip install -r requirements.txt   # if requirements changed
@@ -348,7 +352,7 @@ Default admin is created by the install script. Password is changed on first log
 
 Configure in **Settings → Auth**:
 1. Set the Okta Entity ID, SSO URL, and paste the IdP certificate
-2. In Okta, create a SAML app pointing to `http://SERVER-IP:8767/auth/saml/acs`
+2. In Okta, create a SAML app pointing to `http://<server-ip>:8767/auth/saml/acs`
 3. Map the `role` attribute from Okta claims to `admin` / `analyst` / `viewer`
 
 ---
@@ -358,8 +362,8 @@ Configure in **Settings → Auth**:
 Configure via **Settings → SNMP** in the UI.
 
 - **Trap receiver** — enable/disable, set UDP port (default 162). Restart service after changing port.
-- **Poll engine** — enable/disable, set default poll interval. Per-device intervals override the default.
-- **SNMP version** — global default (v1 / v2c / v3). Override per device in Settings → Devices.
+- **Local polling engine** — enable/disable the built-in poller on this server. Remote otelcol collectors are unaffected — they are managed under **Collectors**.
+- **SNMP version** — global default (v1 / v2c / v3). Override per device.
 - **Community string** — used for v1/v2c devices without a per-device override.
 - **SNMPv3 credentials** — auth key and priv key, stored encrypted at rest.
 
@@ -385,7 +389,7 @@ Switch backends in **Settings → Storage**.
 ### DuckDB (default)
 
 - Zero-config, embedded, no separate service
-- Data file: `/mnt/software/pktsnmp/snmp.duckdb`
+- Data file: `snmp.duckdb`
 - Tables: `snmp_traps`, `snmp_poll_results`
 - Suitable for most deployments up to tens of millions of rows
 
@@ -402,26 +406,27 @@ Switch backends in **Settings → Storage**.
 
 ### Automated backup
 
+Trigger from the UI via **Settings → Backup**, or run:
+
 ```bash
 python backup.py
 ```
 
-Backs up `pktsnmp.db` (SQLite) and `snmp.duckdb` to `/mnt/software/pktsnmp_backups/` with a timestamp. Configure retention in Settings → Backup.
+Backs up `pktsnmp.db` (SQLite) and `snmp.duckdb` to the backup directory configured in Settings.
 
-### Manual backup
+### Manual backup (on the server)
 
 ```bash
-# On O2
-cp /mnt/software/pktsnmp/pktsnmp.db /mnt/software/pktsnmp_backups/pktsnmp_$(date +%Y%m%d_%H%M%S).db
-cp /mnt/software/pktsnmp/snmp.duckdb /mnt/software/pktsnmp_backups/snmp_$(date +%Y%m%d_%H%M%S).duckdb
+cp /opt/pktsnmp/pktsnmp.db /opt/pktsnmp_backups/pktsnmp_$(date +%Y%m%d_%H%M%S).db
+cp /opt/pktsnmp/snmp.duckdb /opt/pktsnmp_backups/snmp_$(date +%Y%m%d_%H%M%S).duckdb
 ```
 
 ### Restore
 
 ```bash
 sudo systemctl stop pktsnmp
-cp /mnt/software/pktsnmp_backups/pktsnmp_<timestamp>.db /mnt/software/pktsnmp/pktsnmp.db
-cp /mnt/software/pktsnmp_backups/snmp_<timestamp>.duckdb /mnt/software/pktsnmp/snmp.duckdb
+cp /opt/pktsnmp_backups/pktsnmp_<timestamp>.db /opt/pktsnmp/pktsnmp.db
+cp /opt/pktsnmp_backups/snmp_<timestamp>.duckdb /opt/pktsnmp/snmp.duckdb
 sudo systemctl start pktsnmp
 ```
 
@@ -434,9 +439,10 @@ sudo systemctl start pktsnmp
 | Service won't start | `journalctl -u pktsnmp -n 50`; check `config.yaml` paths and `secret_key` |
 | Port 162 bind fails | Verify `AmbientCapabilities=CAP_NET_BIND_SERVICE` in the service file; `systemctl daemon-reload && systemctl restart pktsnmp` |
 | No data from otelcol | `journalctl -u otelcol` on collector host; check bearer token matches SQLite; verify `otelcol_label` on device record |
-| 401 on `/ingest/otlp` | Token mismatch — rotate token in Settings → Collectors and re-run update script |
-| Collector status "unknown" | Collector hasn't pushed data yet; run update script; check otelcol is running |
-| Frontend blank / 404 | Build didn't complete; check `frontend/dist/` exists; rebuild with `deploy_frontend.py` |
+| 401 on `/ingest/otlp` | Token mismatch — rotate token in Settings → Collectors and update the collector config |
+| Collector sync fails | Check SSH credentials in Settings → Collectors → SSH tab; verify the key has access to the collector host |
+| Collector status "unknown" | Collector hasn't pushed data yet; check otelcol is running and the OTLP exporter endpoint is correct |
+| Frontend blank / 404 | Build didn't complete; check `frontend/dist/` exists; rebuild via `deploy_frontend.py` |
 | Database locked | Stop service before manually copying DuckDB files; DuckDB is single-writer |
 | ClickHouse not found | Verify ClickHouse is running: `systemctl status clickhouse-server`; check credentials in `config.yaml` |
 
@@ -472,7 +478,7 @@ pktsnmp/
 │   ├── api/          # FastAPI routers (alerts, auth, logs, settings, snmp, system, users)
 │   ├── auth/         # Local JWT + Okta SAML handlers
 │   ├── alerts/       # Alert engine + cleanup
-│   ├── snmp/         # Trap receiver, poll engine, parser, OID catalog
+│   ├── snmp/         # Trap receiver, poll engine, collector push, OID catalog
 │   ├── storage/      # DuckDB + ClickHouse backends, factory
 │   ├── models/       # Pydantic models
 │   ├── backup.py
@@ -489,7 +495,6 @@ pktsnmp/
 │       └── api/      # typed API client
 ├── migrations/       # SQLite schema migrations (auto-applied at startup)
 ├── scripts/          # Deployment + collector update scripts (Paramiko-based)
-├── docs/             # collector-setup.md and other guides
 ├── config.example.yaml
 ├── requirements.txt
 ├── pktsnmp.service
@@ -499,7 +504,7 @@ pktsnmp/
 ### Deployment notes
 
 - **Never build the frontend on Windows** — `node_modules` contains Linux-native rollup binaries
-- **Use Paramiko, not `ssh.exe`** — SentinelOne EDR blocks the Windows SSH client
+- **Use Paramiko for SSH** — avoids system SSH client restrictions in some environments
 - **One script run, no retry loops** — repeated SSH connections can lock the server
 - Migrations are append-only; add new files (`005_*.sql`, etc.) and they auto-apply on next startup
 
@@ -507,9 +512,21 @@ pktsnmp/
 
 ## Related projects
 
-| Project | Port | Description |
-|---|---|---|
-| pktFlow | 8760 | NetFlow ingest and visualization (pktSNMP ancestor) |
-| pktDashboard | 8760 | Suite home / logo hosting |
+| Project | Description |
+|---|---|
+| pktFlow | NetFlow ingest and visualization (pktSNMP ancestor) |
+| pktDashboard | Suite home / logo hosting |
 
-Logos for all pkt apps are served from `http://SERVER-IP:8760/logos/`.
+---
+
+## Logos & Branding
+
+| File | Description |
+|---|---|
+| `lockup.svg` | Full SVG lockup (wordmark + icon) — preferred for docs |
+| `lockup-256h.png` | PNG lockup, 256 px tall |
+| `lockup-128h.png` | PNG lockup, 128 px tall |
+| `lockup-64h.png` | PNG lockup, 64 px tall |
+| `icon.svg` | Icon-only SVG |
+| `icon-512.png` … `icon-16.png` | Icon PNGs at 512 / 256 / 128 / 64 / 48 / 32 / 16 px |
+| `favicon.ico` | Browser favicon |

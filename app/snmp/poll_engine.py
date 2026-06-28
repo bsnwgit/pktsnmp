@@ -28,8 +28,13 @@ def _decrypt(value: str) -> str:
 
 
 class PollEngine:
-    def __init__(self, handler: Callable[[dict], Awaitable[None]]) -> None:
+    def __init__(
+        self,
+        handler: Callable[[dict], Awaitable[None]],
+        failure_handler: Callable[[int, str], Awaitable[None]] | None = None,
+    ) -> None:
         self._handler = handler
+        self._failure_handler = failure_handler
         self._task: asyncio.Task | None = None
         self._reload_event = asyncio.Event()
         self._stop_event = asyncio.Event()
@@ -78,14 +83,14 @@ class PollEngine:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 """SELECT d.id, d.ip, d.name, d.poll_interval_override,
-                       COALESCE(c.snmp_version, d.snmp_version, 'v2c') AS snmp_version,
-                       COALESCE(c.community, d.community, 'public') AS community,
-                       COALESCE(c.security_name, d.security_name, '') AS security_name,
-                       COALESCE(c.security_level, d.security_level, 'noAuthNoPriv') AS security_level,
-                       COALESCE(c.auth_protocol, d.auth_protocol, 'SHA256') AS auth_protocol,
-                       COALESCE(c.auth_key_enc, d.auth_key_enc) AS auth_key_enc,
-                       COALESCE(c.priv_protocol, d.priv_protocol, 'AES128') AS priv_protocol,
-                       COALESCE(c.priv_key_enc, d.priv_key_enc) AS priv_key_enc
+                       COALESCE(NULLIF(d.snmp_version, ''), c.snmp_version, 'v2c') AS snmp_version,
+                       COALESCE(NULLIF(d.community, ''), c.community, 'public') AS community,
+                       COALESCE(NULLIF(d.security_name, ''), c.security_name, '') AS security_name,
+                       COALESCE(NULLIF(d.security_level, ''), c.security_level, 'noAuthNoPriv') AS security_level,
+                       COALESCE(NULLIF(d.auth_protocol, ''), c.auth_protocol, 'SHA256') AS auth_protocol,
+                       COALESCE(d.auth_key_enc, c.auth_key_enc) AS auth_key_enc,
+                       COALESCE(NULLIF(d.priv_protocol, ''), c.priv_protocol, 'AES128') AS priv_protocol,
+                       COALESCE(d.priv_key_enc, c.priv_key_enc) AS priv_key_enc
                    FROM devices d
                    LEFT JOIN snmp_credentials c ON c.id = d.credential_id
                    WHERE d.collector_id=1 AND d.enabled=1"""
@@ -257,11 +262,15 @@ class PollEngine:
                                     await self._update_device_status(
                                         device["id"], "down", "No OIDs returned"
                                     )
+                                    if self._failure_handler:
+                                        await self._failure_handler(device["id"], device["ip"])
                             except Exception as e:
                                 log.error(f"Poll task error for {device['ip']}: {e}")
                                 await self._update_device_status(
                                     device["id"], "down", str(e)
                                 )
+                                if self._failure_handler:
+                                    await self._failure_handler(device["id"], device["ip"])
 
                     await asyncio.gather(*[poll_with_sem(d) for d in due])
 

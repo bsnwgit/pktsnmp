@@ -65,6 +65,23 @@ async def collector_auth(
     return collector
 
 
+_SSH_SECRET_FIELDS = {"ssh_key_enc", "ssh_password_enc"}
+_COLLECTOR_SSH_FIELDS = (
+    "ssh_host", "ssh_port", "ssh_user", "ssh_auth_type",
+    "ssh_key_enc", "ssh_password_enc",
+    "otelcol_config_path", "otelcol_service",
+    "sync_status", "last_synced_at", "last_sync_error",
+)
+
+
+def _mask_collector(collector: dict) -> dict:
+    d = dict(collector)
+    for field in _SSH_SECRET_FIELDS:
+        if d.get(field):
+            d[field] = _MASK          # "key saved" signal for the UI
+    return d
+
+
 def _mask_device(device: dict) -> dict:
     d = dict(device)
     for field in _V3_SECRET_FIELDS:
@@ -123,6 +140,18 @@ class CollectorUpdate(BaseModel):
     version: str | None = None
 
 
+class CollectorSSHUpdate(BaseModel):
+    """[Admin] Write SSH config for a remote collector. Key/password are write-only."""
+    ssh_host: str | None = None             # override; defaults to collector.ip if blank
+    ssh_port: int = 22
+    ssh_user: str | None = None
+    ssh_auth_type: str = "key"              # 'key' | 'password'
+    ssh_key: str | None = None              # PEM text — encrypted at rest, never returned
+    ssh_password: str | None = None        # plaintext — encrypted at rest, never returned
+    otelcol_config_path: str = "/mnt/software/otel/config/otelcol-config.yaml"
+    otelcol_service: str = "otelcol"
+
+
 class DeviceCreate(BaseModel):
     name: str
     ip: str
@@ -131,7 +160,9 @@ class DeviceCreate(BaseModel):
     credential_id: int | None = None
     poll_interval_override: int | None = None
     otelcol_label: str | None = None
+    otelcol_pipeline: str | None = None    # e.g. 'metrics/switch', 'metrics/firewall'
     enabled: bool = True
+    ha_role: str | None = None
 
 
 class DeviceUpdate(BaseModel):
@@ -142,7 +173,9 @@ class DeviceUpdate(BaseModel):
     credential_id: int | None = None
     poll_interval_override: int | None = None
     otelcol_label: str | None = None
+    otelcol_pipeline: str | None = None
     enabled: bool | None = None
+    ha_role: str | None = None
 
 
 class OidCatalogCreate(BaseModel):
@@ -285,27 +318,33 @@ async def delete_credential(cred_id: int, _: AdminUser, db: aiosqlite.Connection
 # COLLECTORS
 # =============================================================================
 
+_COLLECTOR_SELECT = """
+    SELECT id, name, description, ip, last_seen, status, version,
+           ssh_host, ssh_port, ssh_user, ssh_auth_type,
+           ssh_key_enc, ssh_password_enc,
+           otelcol_config_path, otelcol_service,
+           sync_status, last_synced_at, last_sync_error,
+           created_at, updated_at
+    FROM collectors
+"""
+
+
 @router.get("/collectors")
 async def list_collectors(_: CurrentUser, db: aiosqlite.Connection = Depends(get_db)) -> list[dict]:
     db.row_factory = aiosqlite.Row
-    async with db.execute(
-        "SELECT id, name, description, ip, last_seen, status, version, created_at, updated_at FROM collectors ORDER BY id"
-    ) as cur:
+    async with db.execute(f"{_COLLECTOR_SELECT} ORDER BY id") as cur:
         rows = await cur.fetchall()
-    return [dict(r) for r in rows]
+    return [_mask_collector(dict(r)) for r in rows]
 
 
 @router.get("/collectors/{collector_id}")
 async def get_collector(collector_id: int, _: CurrentUser, db: aiosqlite.Connection = Depends(get_db)) -> dict:
     db.row_factory = aiosqlite.Row
-    async with db.execute(
-        "SELECT id, name, description, ip, last_seen, status, version, created_at, updated_at FROM collectors WHERE id=?",
-        (collector_id,),
-    ) as cur:
+    async with db.execute(f"{_COLLECTOR_SELECT} WHERE id=?", (collector_id,)) as cur:
         row = await cur.fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Collector not found")
-    return dict(row)
+    return _mask_collector(dict(row))
 
 
 @router.post("/collectors", status_code=201)
@@ -370,6 +409,185 @@ async def rotate_collector_token(collector_id: int, _: AdminUser, db: aiosqlite.
     return {"id": collector_id, "api_token": new_token, "note": "Token shown once -- store it now"}
 
 
+@router.put("/collectors/{collector_id}/ssh")
+async def update_collector_ssh(
+    collector_id: int, body: CollectorSSHUpdate, _: AdminUser,
+    db: aiosqlite.Connection = Depends(get_db)
+) -> dict:
+    """[Admin] Save SSH config for a remote collector. Key/password are encrypted at rest."""
+    db.row_factory = aiosqlite.Row
+    async with db.execute("SELECT * FROM collectors WHERE id=?", (collector_id,)) as cur:
+        row = await cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Collector not found")
+    if collector_id == 1:
+        raise HTTPException(status_code=400, detail="Built-in local collector does not need SSH config")
+
+    d = dict(row)
+    # Encrypt new key/password if provided; keep existing if not provided
+    if body.ssh_key and body.ssh_key != _MASK:
+        d["ssh_key_enc"] = _encrypt(body.ssh_key)
+    if body.ssh_password and body.ssh_password != _MASK:
+        d["ssh_password_enc"] = _encrypt(body.ssh_password)
+
+    await db.execute(
+        """UPDATE collectors SET
+            ssh_host=?, ssh_port=?, ssh_user=?, ssh_auth_type=?,
+            ssh_key_enc=?, ssh_password_enc=?,
+            otelcol_config_path=?, otelcol_service=?,
+            updated_at=datetime('now')
+           WHERE id=?""",
+        (
+            body.ssh_host or d.get("ssh_host"),
+            body.ssh_port,
+            body.ssh_user or d.get("ssh_user"),
+            body.ssh_auth_type,
+            d.get("ssh_key_enc"),
+            d.get("ssh_password_enc"),
+            body.otelcol_config_path,
+            body.otelcol_service,
+            collector_id,
+        ),
+    )
+    await db.commit()
+    return {"id": collector_id, "updated": True}
+
+
+@router.delete("/collectors/{collector_id}/ssh-key")
+async def delete_collector_ssh_key(
+    collector_id: int, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)
+) -> dict:
+    """[Admin] Remove stored SSH key for a collector."""
+    async with db.execute("SELECT id FROM collectors WHERE id=?", (collector_id,)) as cur:
+        row = await cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Collector not found")
+    await db.execute(
+        "UPDATE collectors SET ssh_key_enc=NULL, updated_at=datetime('now') WHERE id=?",
+        (collector_id,),
+    )
+    await db.commit()
+    return {"id": collector_id, "ssh_key_enc": None}
+
+
+@router.post("/collectors/{collector_id}/test-ssh")
+async def test_collector_ssh(
+    collector_id: int, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)
+) -> dict:
+    """[Admin] Verify SSH reachability of a remote collector. Does not modify anything."""
+    db.row_factory = aiosqlite.Row
+    async with db.execute(f"{_COLLECTOR_SELECT} WHERE id=?", (collector_id,)) as cur:
+        row = await cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Collector not found")
+    if collector_id == 1:
+        raise HTTPException(status_code=400, detail="Built-in local collector is not reachable via SSH")
+    c = dict(row)
+    key_pem = _decrypt(c["ssh_key_enc"]) if c.get("ssh_key_enc") else None
+    password = _decrypt(c["ssh_password_enc"]) if c.get("ssh_password_enc") else None
+    import asyncio as _asyncio
+    from app.snmp.collector_push import test_ssh
+    return await _asyncio.to_thread(test_ssh, c, key_pem, password)
+
+
+@router.get("/collectors/{collector_id}/preview-config")
+async def preview_collector_config(
+    collector_id: int, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)
+) -> dict:
+    """[Admin] Generate and return the YAML that would be pushed (dry-run)."""
+    db.row_factory = aiosqlite.Row
+    async with db.execute(f"{_COLLECTOR_SELECT} WHERE id=?", (collector_id,)) as cur:
+        row = await cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Collector not found")
+    if collector_id == 1:
+        raise HTTPException(status_code=400, detail="Built-in local collector config is managed in-process")
+    c = dict(row)
+    key_pem  = _decrypt(c["ssh_key_enc"]) if c.get("ssh_key_enc") else None
+    password = _decrypt(c["ssh_password_enc"]) if c.get("ssh_password_enc") else None
+    devices_with_creds = await _load_devices_for_push(collector_id, db)
+    import asyncio as _asyncio
+    from app.snmp.collector_push import preview_config
+    yaml_text = await _asyncio.to_thread(preview_config, c, devices_with_creds, key_pem, password)
+    return {"yaml": yaml_text}
+
+
+@router.post("/collectors/{collector_id}/sync")
+async def sync_collector(
+    collector_id: int, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)
+) -> dict:
+    """[Admin] Push current SNMP device config to a remote otelcol collector."""
+    db.row_factory = aiosqlite.Row
+    async with db.execute(f"{_COLLECTOR_SELECT} WHERE id=?", (collector_id,)) as cur:
+        row = await cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Collector not found")
+    if collector_id == 1:
+        raise HTTPException(status_code=400, detail="Built-in local collector is managed in-process — no push needed")
+    c = dict(row)
+    key_pem  = _decrypt(c["ssh_key_enc"]) if c.get("ssh_key_enc") else None
+    password = _decrypt(c["ssh_password_enc"]) if c.get("ssh_password_enc") else None
+    devices_with_creds = await _load_devices_for_push(collector_id, db)
+    import asyncio as _asyncio
+    from app.snmp.collector_push import push_config
+    result = await _asyncio.to_thread(push_config, c, devices_with_creds, key_pem, password)
+    # Update sync status
+    if result["ok"]:
+        await db.execute(
+            "UPDATE collectors SET sync_status='synced', last_synced_at=datetime('now'), last_sync_error=NULL, updated_at=datetime('now') WHERE id=?",
+            (collector_id,),
+        )
+    else:
+        await db.execute(
+            "UPDATE collectors SET sync_status='error', last_sync_error=?, updated_at=datetime('now') WHERE id=?",
+            (result.get("message", "Unknown error")[:500], collector_id),
+        )
+    await db.commit()
+    return result
+
+
+async def _load_devices_for_push(collector_id: int, db: aiosqlite.Connection) -> list[dict]:
+    """Load all enabled devices for a collector, with decrypted SNMP credentials merged in."""
+    db.row_factory = aiosqlite.Row
+    async with db.execute(
+        """SELECT d.id, d.name, d.ip, d.otelcol_label, d.otelcol_pipeline,
+                  d.poll_interval_override,
+                  COALESCE(NULLIF(d.snmp_version, ''), c.snmp_version, 'v2c') AS snmp_version,
+                  COALESCE(NULLIF(d.community, ''), c.community, 'public') AS community,
+                  COALESCE(NULLIF(d.security_name, ''), c.security_name, '') AS security_name,
+                  COALESCE(NULLIF(d.security_level, ''), c.security_level, 'noAuthNoPriv') AS security_level,
+                  COALESCE(NULLIF(d.auth_protocol, ''), c.auth_protocol, 'SHA256') AS auth_protocol,
+                  COALESCE(d.auth_key_enc, c.auth_key_enc) AS auth_key_enc,
+                  COALESCE(NULLIF(d.priv_protocol, ''), c.priv_protocol, 'AES128') AS priv_protocol,
+                  COALESCE(d.priv_key_enc, c.priv_key_enc) AS priv_key_enc
+           FROM devices d
+           LEFT JOIN snmp_credentials c ON c.id = d.credential_id
+           WHERE d.collector_id=? AND d.enabled=1 AND d.otelcol_label IS NOT NULL""",
+        (collector_id,),
+    ) as cur:
+        rows = await cur.fetchall()
+    result = []
+    for row in rows:
+        d = dict(row)
+        # Decrypt SNMP auth/priv keys for otelcol config generation
+        if d.get("auth_key_enc"):
+            try:
+                d["auth_key"] = _decrypt(d["auth_key_enc"])
+            except Exception:
+                d["auth_key"] = ""
+        else:
+            d["auth_key"] = ""
+        if d.get("priv_key_enc"):
+            try:
+                d["priv_key"] = _decrypt(d["priv_key_enc"])
+            except Exception:
+                d["priv_key"] = ""
+        else:
+            d["priv_key"] = ""
+        result.append(d)
+    return result
+
+
 # =============================================================================
 # DEVICES
 # =============================================================================
@@ -377,7 +595,10 @@ async def rotate_collector_token(collector_id: int, _: AdminUser, db: aiosqlite.
 _DEVICE_SELECT = """
     SELECT d.id, d.name, d.ip, d.site, d.collector_id, d.credential_id,
            d.poll_interval_override, d.last_seen, d.status, d.last_error,
-           d.otelcol_label, d.enabled, d.created_at, d.updated_at,
+           d.otelcol_label, d.otelcol_pipeline, d.enabled, d.ha_role,
+           d.created_at, d.updated_at,
+           d.snmp_version AS device_snmp_version,
+           d.community AS device_community,
            col.name AS collector_name,
            cred.name AS credential_name,
            cred.snmp_version AS cred_snmp_version,
@@ -430,11 +651,11 @@ async def create_device(body: DeviceCreate, _: AdminUser, db: aiosqlite.Connecti
         async with db.execute(
             """INSERT INTO devices
                 (name, ip, site, collector_id, credential_id,
-                 poll_interval_override, otelcol_label, enabled)
-               VALUES (?,?,?,?,?,?,?,?) RETURNING id""",
+                 poll_interval_override, otelcol_label, otelcol_pipeline, enabled, ha_role)
+               VALUES (?,?,?,?,?,?,?,?,?,?) RETURNING id""",
             (body.name, body.ip, body.site, body.collector_id, body.credential_id,
-             body.poll_interval_override, body.otelcol_label,
-             1 if body.enabled else 0),
+             body.poll_interval_override, body.otelcol_label, body.otelcol_pipeline,
+             1 if body.enabled else 0, body.ha_role),
         ) as cur:
             row = await cur.fetchone()
         await db.commit()
@@ -457,10 +678,11 @@ async def update_device(device_id: int, body: DeviceUpdate, _: AdminUser, db: ai
     d.update(body.model_dump(exclude_none=True))
     await db.execute(
         """UPDATE devices SET name=?, ip=?, site=?, collector_id=?, credential_id=?,
-            poll_interval_override=?, otelcol_label=?, enabled=?,
-            updated_at=datetime('now') WHERE id=?""",
+            poll_interval_override=?, otelcol_label=?, otelcol_pipeline=?,
+            enabled=?, ha_role=?, updated_at=datetime('now') WHERE id=?""",
         (d.get("name"), d.get("ip"), d.get("site"), d.get("collector_id"), d.get("credential_id"),
-         d.get("poll_interval_override"), d.get("otelcol_label"), d.get("enabled"), device_id),
+         d.get("poll_interval_override"), d.get("otelcol_label"), d.get("otelcol_pipeline"),
+         d.get("enabled"), d.get("ha_role"), device_id),
     )
     await db.commit()
     _signal_reload()
@@ -608,18 +830,9 @@ async def delete_oid(oid_id: int, _: AdminUser, db: aiosqlite.Connection = Depen
 # =============================================================================
 
 async def _do_ingest_otlp(request: Request, collector: dict, db: aiosqlite.Connection) -> dict:
-    """Shared handler for OTLP metric ingest.
-
-    Registered on two paths:
-      POST /api/snmp/ingest/otlp           — legacy / direct callers
-      POST /api/snmp/ingest/otlp/v1/metrics — standard otelcol otlphttp exporter path
-        (otelcol appends /v1/metrics to the configured base endpoint automatically)
-
-    otelcol gzip-compresses OTLP requests by default; decompress before JSON parsing.
-    """
+    """Shared handler for OTLP metric ingest."""
     import gzip as _gzip, json as _json
     raw = await request.body()
-    # Detect gzip magic bytes (\x1f\x8b) and decompress
     if raw[:2] == b'\x1f\x8b':
         raw = _gzip.decompress(raw)
     body = _json.loads(raw)
@@ -627,9 +840,6 @@ async def _do_ingest_otlp(request: Request, collector: dict, db: aiosqlite.Conne
     from app.storage.factory import get_storage
     results = parse_otlp_metrics(body, collector["id"])
     storage = get_storage()
-    # Resolve device_id/device_ip once per unique device label, then apply in
-    # memory before a single bulk insert.  This avoids N SQLite queries + N
-    # individual DuckDB round-trips for large batches (576+ metrics/batch).
     db.row_factory = aiosqlite.Row
     device_cache: dict[str, tuple] = {}
     for result in results:
@@ -646,6 +856,13 @@ async def _do_ingest_otlp(request: Request, collector: dict, db: aiosqlite.Conne
             )
         result["device_id"], result["device_ip"] = device_cache[label]
     await storage.ingest_poll_results_bulk(results)
+    device_ids = {v[0] for v in device_cache.values() if v[0] is not None}
+    for device_id in device_ids:
+        await db.execute(
+            "UPDATE devices SET status='up', last_seen=datetime('now'), "
+            "updated_at=datetime('now') WHERE id=?",
+            (device_id,),
+        )
     await db.execute(
         "UPDATE collectors SET last_seen=datetime('now'), status='online', updated_at=datetime('now') WHERE id=?",
         (collector["id"],),
@@ -661,7 +878,6 @@ async def ingest_otlp(request: Request, collector: dict = Depends(collector_auth
 
 @router.post("/ingest/otlp/v1/metrics", status_code=202)
 async def ingest_otlp_v1_metrics(request: Request, collector: dict = Depends(collector_auth), db: aiosqlite.Connection = Depends(get_db)) -> dict:
-    """Standard otelcol otlphttp exporter path — delegates to shared handler."""
     return await _do_ingest_otlp(request, collector, db)
 
 
@@ -729,17 +945,14 @@ async def run_cleanup(_: AdminUser, db: aiosqlite.Connection = Depends(get_db)) 
 
 @router.get("/dashboard")
 async def snmp_dashboard(_: CurrentUser, db: aiosqlite.Connection = Depends(get_db)) -> dict:
-    """Aggregated dashboard data: trap timeline, top sources, recent traps, device + alert counts."""
     trap_timeline: list[dict] = []
     top_sources:   list[dict] = []
     recent_traps:  list[dict] = []
-
     try:
         from app.storage.factory import get_storage
         storage = get_storage()
-        if hasattr(storage, '_conn'):          # DuckDB path
+        if hasattr(storage, '_conn'):
             conn = storage._conn
-            # 24-hour hourly trap volume
             tl_rows = conn.execute("""
                 SELECT date_trunc('hour', received_at) AS hr, COUNT(*) AS n
                 FROM snmp_traps
@@ -747,8 +960,6 @@ async def snmp_dashboard(_: CurrentUser, db: aiosqlite.Connection = Depends(get_
                 GROUP BY hr ORDER BY hr
             """).fetchall()
             trap_timeline = [{"hour": str(r[0]), "count": int(r[1])} for r in tl_rows]
-
-            # Top trap sources (24h)
             ts_rows = conn.execute("""
                 SELECT source_ip, COUNT(*) AS n
                 FROM snmp_traps
@@ -756,8 +967,6 @@ async def snmp_dashboard(_: CurrentUser, db: aiosqlite.Connection = Depends(get_
                 GROUP BY source_ip ORDER BY n DESC LIMIT 10
             """).fetchall()
             top_sources = [{"source_ip": r[0] or "unknown", "count": int(r[1])} for r in ts_rows]
-
-            # Recent traps
             rt_rows = conn.execute("""
                 SELECT received_at, source_ip, trap_oid, snmp_version
                 FROM snmp_traps ORDER BY received_at DESC LIMIT 10
@@ -768,8 +977,6 @@ async def snmp_dashboard(_: CurrentUser, db: aiosqlite.Connection = Depends(get_
             ]
     except Exception:
         pass
-
-    # Device + alert counts from SQLite
     db.row_factory = aiosqlite.Row
     async with db.execute("SELECT COUNT(*) AS n FROM devices") as cur:
         devices_total = (await cur.fetchone())["n"]
@@ -780,7 +987,6 @@ async def snmp_dashboard(_: CurrentUser, db: aiosqlite.Connection = Depends(get_
     async with db.execute("SELECT COUNT(*) AS n FROM alert_events WHERE acked_at IS NULL") as cur:
         active_alerts = (await cur.fetchone())["n"]
     traps_24h = sum(s["count"] for s in top_sources)
-
     return {
         "trap_timeline": trap_timeline,
         "top_sources": top_sources,
