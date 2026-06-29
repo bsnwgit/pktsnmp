@@ -180,6 +180,7 @@ async def saml_callback(request: Request, db: aiosqlite.Connection = Depends(get
     # Read role from SAML attributes — Okta sends appuser.role as the 'role' attribute
     _VALID_ROLES = {"admin", "analyst", "viewer"}
     attrs = auth.get_attributes()
+    _log.warning("SAML DEBUG attrs for %s: %s", email, dict(attrs))  # TODO: remove after debugging
     raw_role = (attrs.get("role") or attrs.get("Role") or [None])[0]
     okta_role = raw_role.strip().lower() if raw_role else "viewer"
     if okta_role not in _VALID_ROLES:
