@@ -197,6 +197,34 @@ export const api = {
   getSnmpDevices: () => request<SnmpDevice[]>('/snmp/devices'),
   getSnmpTraps: () => request<SnmpTrap[]>('/snmp/traps'),
   getSnmpDashboard: () => request<SnmpDashboard>('/snmp/dashboard'),
+  getDeviceTree: () => request<EnvironmentNode[]>('/snmp/devices/tree'),
+
+  exportDevices: async (): Promise<void> => {
+    const headers: Record<string, string> = {}
+    if (_accessToken) headers['Authorization'] = `Bearer ${_accessToken}`
+    const res = await fetch('/api/snmp/devices/export', { headers })
+    if (!res.ok) throw new Error(`Export failed: ${res.status}`)
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'pktsnmp-devices.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+  },
+
+  importDevices: async (file: File): Promise<{ created: number; skipped: number; errors: string[] }> => {
+    const formData = new FormData()
+    formData.append('file', file)
+    const headers: Record<string, string> = {}
+    if (_accessToken) headers['Authorization'] = `Bearer ${_accessToken}`
+    const res = await fetch('/api/snmp/devices/import-csv', { method: 'POST', headers, body: formData })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }))
+      throw new Error(err.detail || res.statusText)
+    }
+    return res.json()
+  },
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -267,6 +295,53 @@ export interface SnmpTrap {
   oid: string
   community: string
 }
+
+// Environment hierarchy: Org → Group → Site → Device
+// DB columns: org, groups (Group), site (Site)
+export interface OrgTreeNode {
+  type: 'org'
+  name: string
+  direct_alerts: number
+  subtree_alerts: number
+  children: EnvironmentNode[]
+}
+export interface GroupTreeNode {
+  type: 'group'
+  name: string
+  direct_alerts: number
+  subtree_alerts: number
+  children: EnvironmentNode[]
+}
+export interface SiteTreeNode {
+  type: 'site'
+  name: string
+  direct_alerts: number
+  subtree_alerts: number
+  children: EnvironmentNode[]
+}
+export interface DeviceTreeNode {
+  type: 'device'
+  id: number
+  name: string
+  ip: string
+  org: string
+  groups: string          // displayed as "Group"
+  site: string            // displayed as "Site"
+  device_type: string     // firewall|switch|wap|wlc|router|iot|ups|server|storage|pdu|camera|load_balancer|vpn|printer|other|''
+  status: string          // 'up' | 'down' | 'unknown'
+  enabled: boolean
+  parent_device_id: number | null
+  ha_role: string | null  // 'active' | 'passive' | 'standalone' | null
+  ha_peer_id: number | null
+  last_seen: string | null
+  direct_alerts: number
+  subtree_alerts: number
+  children: EnvironmentNode[]
+}
+export type EnvironmentNode = OrgTreeNode | GroupTreeNode | SiteTreeNode | DeviceTreeNode
+
+/** @deprecated use EnvironmentNode / DeviceTreeNode */
+export type SnmpDeviceNode = DeviceTreeNode
 
 export interface SnmpDashboard {
   trap_timeline: Array<{ hour: string; count: number }>
