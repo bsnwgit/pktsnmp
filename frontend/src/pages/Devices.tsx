@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { api, getToken } from '../api/client'
+import { api, getToken, HierarchyOrg } from '../api/client'
 
 interface Collector {
   id: number; name: string; description: string; ip: string | null
@@ -67,11 +67,12 @@ const EMPTY_DEVICE: DeviceFormState = {
   ha_peer_id: '',
 }
 
-function DeviceFormModal({ device, collectors, credentials, allDevices, onClose, onSaved }: {
+function DeviceFormModal({ device, collectors, credentials, allDevices, hierarchyOrgs, onClose, onSaved }: {
   device: Device | null
   collectors: Collector[]
   credentials: Credential[]
   allDevices: Device[]
+  hierarchyOrgs: HierarchyOrg[]
   onClose: () => void
   onSaved: () => void
 }) {
@@ -159,23 +160,72 @@ function DeviceFormModal({ device, collectors, credentials, allDevices, onClose,
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <label className="text-xs text-gray-400 block mb-1">Org</label>
-              <input value={form.org} onChange={e => setF('org', e.target.value)} placeholder="Example Corp"
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
-            </div>
-            <div>
-              <label className="text-xs text-gray-400 block mb-1">Group</label>
-              <input value={form.groups} onChange={e => setF('groups', e.target.value)} placeholder="SiteA"
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
-            </div>
-            <div>
-              <label className="text-xs text-gray-400 block mb-1">Site</label>
-              <input value={form.site} onChange={e => setF('site', e.target.value)} placeholder="MDF"
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
-            </div>
-          </div>
+          {/* Org / Group / Site — cascading selects from hierarchy definition */}
+          {(() => {
+            const orgOptions    = hierarchyOrgs.map(o => o.name)
+            const selectedOrg   = hierarchyOrgs.find(o => o.name === form.org) ?? null
+            const groupOptions  = selectedOrg ? selectedOrg.groups.map(g => g.name) : []
+            const selectedGroup = selectedOrg?.groups.find(g => g.name === form.groups) ?? null
+            const siteOptions   = selectedGroup ? selectedGroup.sites.map(s => s.name) : []
+
+            // If a saved value isn't in the hierarchy (device predates hierarchy definition),
+            // add it as an option so the form doesn't silently lose it.
+            const orgList    = [...new Set([...(form.org    ? [form.org]    : []), ...orgOptions])]
+            const groupList  = [...new Set([...(form.groups ? [form.groups] : []), ...groupOptions])]
+            const siteList   = [...new Set([...(form.site   ? [form.site]   : []), ...siteOptions])]
+
+            const selectCls = "w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+
+            return (
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Org</label>
+                  <select
+                    value={form.org}
+                    onChange={e => {
+                      setF('org', e.target.value)
+                      setF('groups', '')
+                      setF('site', '')
+                    }}
+                    className={selectCls}
+                  >
+                    <option value="">— unassigned —</option>
+                    {orgList.map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                  {hierarchyOrgs.length === 0 && (
+                    <p className="text-xs text-amber-500 mt-0.5">Define orgs in Settings → Hierarchy</p>
+                  )}
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Group</label>
+                  <select
+                    value={form.groups}
+                    onChange={e => {
+                      setF('groups', e.target.value)
+                      setF('site', '')
+                    }}
+                    disabled={!form.org && groupList.length === 0}
+                    className={selectCls}
+                  >
+                    <option value="">— unassigned —</option>
+                    {groupList.map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Site</label>
+                  <select
+                    value={form.site}
+                    onChange={e => setF('site', e.target.value)}
+                    disabled={!form.groups && siteList.length === 0}
+                    className={selectCls}
+                  >
+                    <option value="">— unassigned —</option>
+                    {siteList.map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </div>
+              </div>
+            )
+          })()}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="text-xs text-gray-400 block mb-1">Device type</label>
@@ -314,6 +364,7 @@ export default function Devices() {
   const [devices, setDevices]         = useState<Device[]>([])
   const [collectors, setCollectors]   = useState<Collector[]>([])
   const [credentials, setCredentials] = useState<Credential[]>([])
+  const [hierarchyOrgs, setHierarchyOrgs] = useState<HierarchyOrg[]>([])
   const [loading, setLoading]         = useState(true)
   const [modal, setModal]             = useState<Device | null | 'new'>(null)
   const [confirm, setConfirm]         = useState<Device | null>(null)
@@ -339,6 +390,8 @@ export default function Devices() {
       setDevices(Array.isArray(devData) ? devData : [])
       setCollectors(Array.isArray(colData) ? colData : [])
       setCredentials(Array.isArray(credData) ? credData : [])
+      // Load hierarchy for cascading selects (non-fatal if unavailable)
+      try { setHierarchyOrgs(await api.getHierarchy()) } catch {}
     } catch (e: any) { setError(e.message) } finally { setLoading(false) }
   }
   useEffect(() => { void load() }, [])
@@ -421,7 +474,7 @@ export default function Devices() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto space-y-4">
+    <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <h1 className="text-lg font-semibold text-white">Devices</h1>
@@ -549,6 +602,7 @@ export default function Devices() {
           collectors={collectors}
           credentials={credentials}
           allDevices={devices}
+          hierarchyOrgs={hierarchyOrgs}
           onClose={() => setModal(null)}
           onSaved={() => { setModal(null); void load() }}
         />
