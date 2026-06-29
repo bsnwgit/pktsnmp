@@ -226,6 +226,57 @@ export const api = {
     return res.json()
   },
 
+  // ── Metrics ───────────────────────────────────────────────────────────────
+  getDeviceMetricsLatest: (deviceId: number) =>
+    request<MetricLatestItem[]>(`/snmp/devices/${deviceId}/metrics/latest`),
+
+  getDeviceMetricsLatestByIp: (deviceIp: string) =>
+    request<MetricLatestItem[]>(`/snmp/devices/by-ip/${encodeURIComponent(deviceIp)}/metrics/latest`),
+
+  getDeviceMetricsHistory: (
+    deviceId: number,
+    params: {
+      oid_labels?: string
+      since?: string
+      until?: string
+      limit?: number
+      interface_label?: string   // filter to one interface (ifDescr value)
+    } = {}
+  ) => {
+    const q = new URLSearchParams()
+    if (params.oid_labels)       q.set('oid_labels',       params.oid_labels)
+    if (params.since)            q.set('since',             params.since)
+    if (params.until)            q.set('until',             params.until)
+    if (params.limit)            q.set('limit',             String(params.limit))
+    if (params.interface_label)  q.set('interface_label',   params.interface_label)
+    return request<MetricsHistoryResponse>(`/snmp/devices/${deviceId}/metrics/history?${q}`)
+  },
+
+  getMetricsOverview: () =>
+    request<DeviceMetricsCard[]>('/snmp/metrics/overview'),
+
+  getDeviceInterfaces: (deviceId: number) =>
+    request<DeviceInterface[]>(`/snmp/devices/${deviceId}/interfaces`),
+
+  downloadDeviceMetricsCsv: async (deviceId: number, since = '24h'): Promise<void> => {
+    const headers: Record<string, string> = {}
+    if (_accessToken) headers['Authorization'] = `Bearer ${_accessToken}`
+    const res = await fetch(`/api/snmp/devices/${deviceId}/metrics/history?since=${since}&format=csv`, { headers })
+    if (!res.ok) throw new Error(`CSV export failed: ${res.status}`)
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `device-${deviceId}-metrics.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  },
+
+  getCollectorIngestRate: (collectorId: number, hours = 1, bucketMinutes = 5) =>
+    request<IngestRateBucket[]>(
+      `/snmp/collectors/${collectorId}/ingest-rate?hours=${hours}&bucket_minutes=${bucketMinutes}`
+    ),
+
   // ── Alerts ────────────────────────────────────────────────────────────────
   getAlertEvents: (params?: { active?: boolean; acked?: boolean; limit?: number }) => {
     const q = new URLSearchParams()
@@ -434,4 +485,207 @@ export type LogQueryParams = {
   since?: string
   limit?: string
   offset?: string
+}
+
+// ── Metrics types ─────────────────────────────────────────────────────────────
+
+/** One row from the metrics/latest endpoint */
+export interface MetricLatestItem {
+  oid_label: string
+  value: string | null
+  value_numeric: number | null
+  value_type: string | null
+  polled_at: string
+}
+
+/** One time-bucketed row from metrics/history */
+export interface MetricPoint {
+  bucket_ts: string
+  oid_label: string
+  avg_value: number | null
+  max_value: number | null
+  min_value: number | null
+  sample_count: number
+}
+
+/** Alert event within a metric history window (chart annotation marker) */
+export interface MetricAlertEvent {
+  id: number
+  fired_at: string
+  severity: 'info' | 'warning' | 'critical'
+  message: string
+  rule_name: string
+  resolved_at: string | null
+  auto_resolved: number
+}
+
+/** SNMP trap within a metric history window (timeline overlay) */
+export interface MetricTrapEvent {
+  id: number
+  received_at: string
+  trap_oid: string | null
+  source_ip: string | null
+}
+
+/** Full response from GET /metrics/history */
+export interface MetricsHistoryResponse {
+  series: MetricPoint[]
+  alert_events: MetricAlertEvent[]
+  trap_events: MetricTrapEvent[]
+  bucket_seconds: number
+  since_iso: string | null
+}
+
+/** One bucket from GET /collectors/{id}/ingest-rate */
+export interface IngestRateBucket {
+  bucket_ts: string
+  poll_count: number
+  active_devices: number
+}
+
+// ── Time range helpers ────────────────────────────────────────────────────────
+
+export type TimeRange = '1h' | '6h' | '24h' | '7d' | 'custom'
+
+export const TIME_RANGE_LABELS: Record<TimeRange, string> = {
+  '1h':     '1 Hour',
+  '6h':     '6 Hours',
+  '24h':    '24 Hours',
+  '7d':     '7 Days',
+  'custom': 'Custom',
+}
+
+// ── OID metadata ─────────────────────────────────────────────────────────────
+
+/** Display metadata for each known OID label */
+export const OID_META: Record<string, { label: string; unit: string; isCounter: boolean; isStatus: boolean }> = {
+  ifInOctets:        { label: 'In Traffic',        unit: 'B/s',    isCounter: true,  isStatus: false },
+  ifOutOctets:       { label: 'Out Traffic',        unit: 'B/s',    isCounter: true,  isStatus: false },
+  ifInUcastPkts:     { label: 'In Packets',         unit: 'pkt/s',  isCounter: true,  isStatus: false },
+  ifOutUcastPkts:    { label: 'Out Packets',         unit: 'pkt/s',  isCounter: true,  isStatus: false },
+  ifInErrors:        { label: 'In Errors',          unit: 'err/s',  isCounter: true,  isStatus: false },
+  ifOutErrors:       { label: 'Out Errors',         unit: 'err/s',  isCounter: true,  isStatus: false },
+  ifInDiscards:      { label: 'In Discards',        unit: 'pkt/s',  isCounter: true,  isStatus: false },
+  ifOutDiscards:     { label: 'Out Discards',       unit: 'pkt/s',  isCounter: true,  isStatus: false },
+  ifSpeedMetric:     { label: 'Interface Speed',    unit: 'bps',    isCounter: false, isStatus: false },
+  ifOperStatusMetric:{ label: 'Oper Status',        unit: '',       isCounter: false, isStatus: true  },
+  ifAdminStatusMetric:{ label: 'Admin Status',      unit: '',       isCounter: false, isStatus: true  },
+  Status:            { label: 'Status',             unit: '',       isCounter: false, isStatus: true  },
+  // 64-bit HC counters (ifXTable)
+  ifHCInOctets:      { label: 'In Traffic (HC)',    unit: 'B/s',    isCounter: true,  isStatus: false },
+  ifHCOutOctets:     { label: 'Out Traffic (HC)',   unit: 'B/s',    isCounter: true,  isStatus: false },
+  ifHCInUcastPkts:   { label: 'In Pkts (HC)',       unit: 'pkt/s',  isCounter: true,  isStatus: false },
+  ifHCOutUcastPkts:  { label: 'Out Pkts (HC)',      unit: 'pkt/s',  isCounter: true,  isStatus: false },
+  // PAN-OS per-interface (panIfStatsTable)
+  panIfInBytes:      { label: 'PAN In Traffic',     unit: 'B/s',    isCounter: true,  isStatus: false },
+  panIfOutBytes:     { label: 'PAN Out Traffic',    unit: 'B/s',    isCounter: true,  isStatus: false },
+  panIfInPkts:       { label: 'PAN In Packets',     unit: 'pkt/s',  isCounter: true,  isStatus: false },
+  panIfOutPkts:      { label: 'PAN Out Packets',    unit: 'pkt/s',  isCounter: true,  isStatus: false },
+  panIfInDropPkts:   { label: 'PAN In Drops',       unit: 'pkt/s',  isCounter: true,  isStatus: false },
+  panIfOutDropPkts:  { label: 'PAN Out Drops',      unit: 'pkt/s',  isCounter: true,  isStatus: false },
+  // PAN-OS system scalars
+  panSysCpuUtilMgmt:     { label: 'Mgmt CPU %',        unit: '%',  isCounter: false, isStatus: false },
+  panSysCpuUtilDataPlane:{ label: 'DataPlane CPU %',   unit: '%',  isCounter: false, isStatus: false },
+  panSysMemUsed:         { label: 'Memory Used (KB)',   unit: 'KB', isCounter: false, isStatus: false },
+  panSysMemAvail:        { label: 'Memory Avail (KB)',  unit: 'KB', isCounter: false, isStatus: false },
+  panSessionUtilization: { label: 'Session Util %',    unit: '%',  isCounter: false, isStatus: false },
+  panSessionMax:         { label: 'Session Max',        unit: '',   isCounter: false, isStatus: false },
+  panSessionActive:      { label: 'Active Sessions',    unit: '',   isCounter: false, isStatus: false },
+  panSessionActiveTcp:   { label: 'Active TCP',         unit: '',   isCounter: false, isStatus: false },
+  panSessionActiveUdp:   { label: 'Active UDP',         unit: '',   isCounter: false, isStatus: false },
+  panSessionActiveICMP:  { label: 'Active ICMP',        unit: '',   isCounter: false, isStatus: false },
+}
+
+// ── Alert rule types for SNMP ─────────────────────────────────────────────────
+
+export type SnmpAlertRuleType =
+  // Existing
+  | 'device_down'
+  | 'unknown_trap_source'
+  // New metric-based
+  | 'metric_threshold'
+  | 'metric_spike'
+  | 'interface_down'
+  | 'interface_flap'
+  | 'error_rate'
+  | 'discard_rate'
+  | 'high_error_ratio'
+  | 'bandwidth_utilization'
+  | 'speed_change'
+  | 'collector_gap'
+  | 'device_unreachable'
+  | 'trap_received'
+
+export interface SnmpAlertRule {
+  id: number
+  name: string
+  description: string
+  enabled: boolean
+  rule_type: SnmpAlertRuleType
+  conditions: Record<string, unknown>
+  time_window_min: number
+  severity: 'info' | 'warning' | 'critical'
+  channels: string[]
+  cooldown_min: number
+  last_fired: string | null
+  created_at: string
+  updated_at: string
+  builtin?: boolean
+}
+
+/** One interface from GET /devices/{id}/interfaces.
+ *  interface_label = ifDescr value from otelcol attribute, used as the unique key.
+ */
+export interface DeviceInterface {
+  interface_label: string   // e.g. "GigabitEthernet0/0"
+  name: string              // same as interface_label
+  oper_status: 'up' | 'down' | 'unknown'
+  admin_status: 'up' | 'down' | 'unknown'
+  speed_mbps: number | null
+  if_type: string | null
+  mac: string | null
+}
+
+/** Latest metric snapshot for one OID on a device */
+export interface MetricSnapshot {
+  value: string | null
+  value_numeric: number | null
+  value_type: string | null
+  polled_at: string
+}
+
+/** One device's card data from GET /snmp/metrics/overview */
+export interface DeviceMetricsCard {
+  device: {
+    id: number
+    name: string
+    ip: string
+    device_type: string
+    status: string        // 'up' | 'down' | 'unknown'
+    org: string
+    groups: string
+    site: string
+    enabled: boolean
+    last_seen: string | null
+  }
+  latest: Record<string, MetricSnapshot>  // keyed by oid_label
+  has_data: boolean
+  has_interfaces: boolean
+}
+
+export const SNMP_RULE_TYPE_LABELS: Record<SnmpAlertRuleType, string> = {
+  device_down:          'Device Unreachable',
+  unknown_trap_source:  'Unknown Trap Source',
+  metric_threshold:     'Metric Threshold',
+  metric_spike:         'Metric Spike (vs. baseline)',
+  interface_down:       'Interface Down',
+  interface_flap:       'Interface Flap',
+  error_rate:           'Error Rate',
+  discard_rate:         'Discard Rate',
+  high_error_ratio:     'High Error Ratio (%)',
+  bandwidth_utilization:'Bandwidth Utilization (%)',
+  speed_change:         'Interface Speed Change',
+  collector_gap:        'Collector Data Gap',
+  device_unreachable:   'Device Poll Gap',
+  trap_received:        'Specific Trap Received',
 }
