@@ -445,7 +445,7 @@ async def device_tree(_: CurrentUser, db: aiosqlite.Connection = Depends(get_db)
 
     # Fetch ALL devices (passive too) to build peer map
     async with db.execute(
-        """SELECT id, name, ip, org, groups, site, status, enabled,
+        """SELECT id, name, ip, org, groups, site, device_type, status, enabled,
                   parent_device_id, ha_role, ha_peer_id, last_seen
            FROM devices ORDER BY name"""
     ) as cur:
@@ -944,6 +944,13 @@ async def _do_ingest_otlp(request: Request, collector: dict, db: aiosqlite.Conne
             )
         result["device_id"], result["device_ip"] = device_cache[label]
     await storage.ingest_poll_results_bulk(results)
+    # Update last_seen + status for every device that reported data this batch
+    seen_device_ids = {v[0] for v in device_cache.values() if v[0] is not None}
+    for did in seen_device_ids:
+        await db.execute(
+            "UPDATE devices SET last_seen=datetime('now'), status='up', updated_at=datetime('now') WHERE id=?",
+            (did,),
+        )
     await db.execute(
         "UPDATE collectors SET last_seen=datetime('now'), status='online', updated_at=datetime('now') WHERE id=?",
         (collector["id"],),
@@ -1092,6 +1099,124 @@ async def snmp_dashboard(_: CurrentUser, db: aiosqlite.Connection = Depends(get_
         },
         "traps_24h": traps_24h,
     }
+
+
+# =============================================================================
+# ORG / GROUP / SITE HIERARCHY MANAGEMENT
+# =============================================================================
+
+class OrgCreate(BaseModel):
+    name: str
+
+
+class GroupDefCreate(BaseModel):
+    name: str
+    org_id: int
+
+
+class SiteDefCreate(BaseModel):
+    name: str
+    group_id: int
+
+
+@router.get("/hierarchy")
+async def get_hierarchy(_: CurrentUser, db: aiosqlite.Connection = Depends(get_db)) -> list[dict]:
+    """Return the full org → group → site hierarchy tree."""
+    db.row_factory = aiosqlite.Row
+    async with db.execute("SELECT id, name FROM orgs ORDER BY name") as cur:
+        orgs = [dict(r) for r in await cur.fetchall()]
+    for org in orgs:
+        async with db.execute(
+            "SELECT id, name FROM groups_def WHERE org_id=? ORDER BY name", (org["id"],)
+        ) as cur:
+            groups = [dict(r) for r in await cur.fetchall()]
+        for grp in groups:
+            async with db.execute(
+                "SELECT id, name FROM sites_def WHERE group_id=? ORDER BY name", (grp["id"],)
+            ) as cur:
+                grp["sites"] = [dict(r) for r in await cur.fetchall()]
+        org["groups"] = groups
+    return orgs
+
+
+@router.post("/hierarchy/orgs", status_code=201)
+async def create_org(body: OrgCreate, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)) -> dict:
+    try:
+        async with db.execute(
+            "INSERT INTO orgs (name) VALUES (?) RETURNING id, name", (body.name.strip(),)
+        ) as cur:
+            row = await cur.fetchone()
+        await db.commit()
+    except Exception as e:
+        if "UNIQUE" in str(e):
+            raise HTTPException(status_code=409, detail=f"Org '{body.name}' already exists")
+        raise
+    return {"id": row[0], "name": row[1], "groups": []}
+
+
+@router.delete("/hierarchy/orgs/{org_id}", status_code=204)
+async def delete_org(org_id: int, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)) -> None:
+    async with db.execute("SELECT id FROM orgs WHERE id=?", (org_id,)) as cur:
+        if not await cur.fetchone():
+            raise HTTPException(status_code=404, detail="Org not found")
+    await db.execute("DELETE FROM orgs WHERE id=?", (org_id,))
+    await db.commit()
+
+
+@router.post("/hierarchy/groups", status_code=201)
+async def create_group_def(body: GroupDefCreate, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)) -> dict:
+    async with db.execute("SELECT id FROM orgs WHERE id=?", (body.org_id,)) as cur:
+        if not await cur.fetchone():
+            raise HTTPException(status_code=404, detail="Org not found")
+    try:
+        async with db.execute(
+            "INSERT INTO groups_def (org_id, name) VALUES (?,?) RETURNING id, name, org_id",
+            (body.org_id, body.name.strip()),
+        ) as cur:
+            row = await cur.fetchone()
+        await db.commit()
+    except Exception as e:
+        if "UNIQUE" in str(e):
+            raise HTTPException(status_code=409, detail=f"Group '{body.name}' already exists in this org")
+        raise
+    return {"id": row[0], "name": row[1], "org_id": row[2], "sites": []}
+
+
+@router.delete("/hierarchy/groups/{group_id}", status_code=204)
+async def delete_group_def(group_id: int, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)) -> None:
+    async with db.execute("SELECT id FROM groups_def WHERE id=?", (group_id,)) as cur:
+        if not await cur.fetchone():
+            raise HTTPException(status_code=404, detail="Group not found")
+    await db.execute("DELETE FROM groups_def WHERE id=?", (group_id,))
+    await db.commit()
+
+
+@router.post("/hierarchy/sites", status_code=201)
+async def create_site_def(body: SiteDefCreate, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)) -> dict:
+    async with db.execute("SELECT id FROM groups_def WHERE id=?", (body.group_id,)) as cur:
+        if not await cur.fetchone():
+            raise HTTPException(status_code=404, detail="Group not found")
+    try:
+        async with db.execute(
+            "INSERT INTO sites_def (group_id, name) VALUES (?,?) RETURNING id, name, group_id",
+            (body.group_id, body.name.strip()),
+        ) as cur:
+            row = await cur.fetchone()
+        await db.commit()
+    except Exception as e:
+        if "UNIQUE" in str(e):
+            raise HTTPException(status_code=409, detail=f"Site '{body.name}' already exists in this group")
+        raise
+    return {"id": row[0], "name": row[1], "group_id": row[2]}
+
+
+@router.delete("/hierarchy/sites/{site_id}", status_code=204)
+async def delete_site_def(site_id: int, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)) -> None:
+    async with db.execute("SELECT id FROM sites_def WHERE id=?", (site_id,)) as cur:
+        if not await cur.fetchone():
+            raise HTTPException(status_code=404, detail="Site not found")
+    await db.execute("DELETE FROM sites_def WHERE id=?", (site_id,))
+    await db.commit()
 
 
 def _signal_reload() -> None:

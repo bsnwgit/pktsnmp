@@ -225,6 +225,33 @@ export const api = {
     }
     return res.json()
   },
+
+  // ── Alerts ────────────────────────────────────────────────────────────────
+  getAlertEvents: (params?: { active?: boolean; acked?: boolean; limit?: number }) => {
+    const q = new URLSearchParams()
+    if (params?.active  !== undefined) q.set('active',  String(params.active))
+    if (params?.acked   !== undefined) q.set('acked',   String(params.acked))
+    if (params?.limit   !== undefined) q.set('limit',   String(params.limit))
+    return request<Array<Record<string, unknown>>>(`/alerts/events?${q}`)
+  },
+  getAlertRules: () => request<Array<Record<string, unknown>>>('/alerts/rules'),
+  ackAlertEvent: (id: number) => request(`/alerts/events/${id}/ack`, { method: 'POST' }),
+  ackAllAlertEvents: () => request('/alerts/events/ack-all', { method: 'POST' }),
+
+  // ── Hierarchy (Org / Group / Site pick-list definitions) ──────────────────
+  getHierarchy: () => request<HierarchyOrg[]>('/snmp/hierarchy'),
+  createHierarchyOrg: (name: string) =>
+    request<HierarchyOrg>('/snmp/hierarchy/orgs', { method: 'POST', body: JSON.stringify({ name }) }),
+  deleteHierarchyOrg: (id: number) =>
+    request<void>(`/snmp/hierarchy/orgs/${id}`, { method: 'DELETE' }),
+  createHierarchyGroup: (name: string, org_id: number) =>
+    request<HierarchyGroup>('/snmp/hierarchy/groups', { method: 'POST', body: JSON.stringify({ name, org_id }) }),
+  deleteHierarchyGroup: (id: number) =>
+    request<void>(`/snmp/hierarchy/groups/${id}`, { method: 'DELETE' }),
+  createHierarchySite: (name: string, group_id: number) =>
+    request<HierarchySite>('/snmp/hierarchy/sites', { method: 'POST', body: JSON.stringify({ name, group_id }) }),
+  deleteHierarchySite: (id: number) =>
+    request<void>(`/snmp/hierarchy/sites/${id}`, { method: 'DELETE' }),
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -332,6 +359,24 @@ export type EnvironmentNode = OrgTreeNode | GroupTreeNode | SiteTreeNode | Devic
 
 /** @deprecated use EnvironmentNode / DeviceTreeNode */
 export type SnmpDeviceNode = DeviceTreeNode
+
+// Org / Group / Site hierarchy definition types (pick-list for device form dropdowns)
+export interface HierarchySite {
+  id: number
+  name: string
+}
+
+export interface HierarchyGroup {
+  id: number
+  name: string
+  sites: HierarchySite[]
+}
+
+export interface HierarchyOrg {
+  id: number
+  name: string
+  groups: HierarchyGroup[]
+}
 
 export interface SnmpDashboard {
   trap_timeline: Array<{ hour: string; count: number }>
