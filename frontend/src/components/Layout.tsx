@@ -78,7 +78,7 @@ const NAV = [
   { to: '/collectors',  label: 'Collectors', icon: '⇅', adminOnly: false },
   { to: '/devices',     label: 'Devices',    icon: '⬡', adminOnly: false },
   { to: '/oid-catalog', label: 'OID Catalog', icon: '≡', adminOnly: false },
-  { to: '/settings',    label: 'Settings',   icon: '⚙', adminOnly: false },
+  { to: '/settings',    label: 'Settings',   icon: '⚙', adminOnly: true },
 ]
 
 const INTERVALS = [
