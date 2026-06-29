@@ -346,6 +346,287 @@ BUNDLED_OIDS: list[dict[str, str]] = [
         "data_type": "gauge",
     },
 
+    # ── IF-MIB Extension (ifXTable, RFC 2863) — 64-bit HC counters ──────────
+    {
+        "oid": "1.3.6.1.2.1.31.1.1.1.6",
+        "name": "ifHCInOctets",
+        "description": "The total number of octets received on the interface (64-bit counter). Use instead of ifInOctets on high-speed links.",
+        "unit": "bytes",
+        "data_type": "counter",
+    },
+    {
+        "oid": "1.3.6.1.2.1.31.1.1.1.7",
+        "name": "ifHCInUcastPkts",
+        "description": "The number of packets delivered to a higher-layer protocol (64-bit counter).",
+        "unit": "packets",
+        "data_type": "counter",
+    },
+    {
+        "oid": "1.3.6.1.2.1.31.1.1.1.10",
+        "name": "ifHCOutOctets",
+        "description": "The total number of octets transmitted out of the interface (64-bit counter). Use instead of ifOutOctets on high-speed links.",
+        "unit": "bytes",
+        "data_type": "counter",
+    },
+    {
+        "oid": "1.3.6.1.2.1.31.1.1.1.11",
+        "name": "ifHCOutUcastPkts",
+        "description": "The total number of packets transmitted to a higher-layer protocol (64-bit counter).",
+        "unit": "packets",
+        "data_type": "counter",
+    },
+
+    # ── Palo Alto PAN-OS MIB (PAN-COMMON-MIB, enterprise .1.3.6.1.4.1.25461) ─
+    # System resources
+    {
+        "oid": "1.3.6.1.4.1.25461.2.1.2.1.10.0",
+        "name": "panSysCpuUtilMgmt",
+        "description": "PAN-OS management-plane CPU utilization percentage.",
+        "unit": "percent",
+        "data_type": "gauge",
+    },
+    {
+        "oid": "1.3.6.1.4.1.25461.2.1.2.1.11.0",
+        "name": "panSysCpuUtilDataPlane",
+        "description": "PAN-OS data-plane CPU utilization percentage.",
+        "unit": "percent",
+        "data_type": "gauge",
+    },
+    {
+        "oid": "1.3.6.1.4.1.25461.2.1.2.1.14.0",
+        "name": "panSysMemUsed",
+        "description": "PAN-OS memory currently in use, in kilobytes.",
+        "unit": "kilobytes",
+        "data_type": "gauge",
+    },
+    {
+        "oid": "1.3.6.1.4.1.25461.2.1.2.1.15.0",
+        "name": "panSysMemAvail",
+        "description": "PAN-OS memory currently available, in kilobytes.",
+        "unit": "kilobytes",
+        "data_type": "gauge",
+    },
+    {
+        "oid": "1.3.6.1.4.1.25461.2.1.2.1.6.0",
+        "name": "panSysSwVersion",
+        "description": "PAN-OS software version string (e.g. '10.2.4-h4').",
+        "unit": "",
+        "data_type": "string",
+    },
+    {
+        "oid": "1.3.6.1.4.1.25461.2.1.2.1.2.0",
+        "name": "panSysHwVersion",
+        "description": "PAN-OS hardware model/version string.",
+        "unit": "",
+        "data_type": "string",
+    },
+    {
+        "oid": "1.3.6.1.4.1.25461.2.1.2.1.16.0",
+        "name": "panSysSwapUsed",
+        "description": "PAN-OS swap space currently in use, in kilobytes.",
+        "unit": "kilobytes",
+        "data_type": "gauge",
+    },
+    # Session table
+    {
+        "oid": "1.3.6.1.4.1.25461.2.1.2.3.2.0",
+        "name": "panSessionUtilization",
+        "description": "PAN-OS session table utilization percentage.",
+        "unit": "percent",
+        "data_type": "gauge",
+    },
+    {
+        "oid": "1.3.6.1.4.1.25461.2.1.2.3.3.0",
+        "name": "panSessionMax",
+        "description": "PAN-OS maximum number of sessions supported.",
+        "unit": "",
+        "data_type": "gauge",
+    },
+    {
+        "oid": "1.3.6.1.4.1.25461.2.1.2.3.4.0",
+        "name": "panSessionActive",
+        "description": "PAN-OS number of currently active sessions.",
+        "unit": "",
+        "data_type": "gauge",
+    },
+    {
+        "oid": "1.3.6.1.4.1.25461.2.1.2.3.5.0",
+        "name": "panSessionActiveTcp",
+        "description": "PAN-OS number of active TCP sessions.",
+        "unit": "",
+        "data_type": "gauge",
+    },
+    {
+        "oid": "1.3.6.1.4.1.25461.2.1.2.3.6.0",
+        "name": "panSessionActiveUdp",
+        "description": "PAN-OS number of active UDP sessions.",
+        "unit": "",
+        "data_type": "gauge",
+    },
+    {
+        "oid": "1.3.6.1.4.1.25461.2.1.2.3.7.0",
+        "name": "panSessionActiveICMP",
+        "description": "PAN-OS number of active ICMP sessions.",
+        "unit": "",
+        "data_type": "gauge",
+    },
+    # panIfStatsTable — per-interface traffic counters (indexed by interface name string)
+    {
+        "oid": "1.3.6.1.4.1.25461.2.1.2.4.1.1.1",
+        "name": "panIfStatsIfname",
+        "description": "PAN-OS interface name (table index column of panIfStatsTable).",
+        "unit": "",
+        "data_type": "string",
+    },
+    {
+        "oid": "1.3.6.1.4.1.25461.2.1.2.4.1.1.3",
+        "name": "panIfStatsIfinBytes",
+        "description": "PAN-OS bytes received on this interface (per panIfStatsTable row).",
+        "unit": "bytes",
+        "data_type": "counter",
+    },
+    {
+        "oid": "1.3.6.1.4.1.25461.2.1.2.4.1.1.4",
+        "name": "panIfStatsIfoutBytes",
+        "description": "PAN-OS bytes transmitted on this interface (per panIfStatsTable row).",
+        "unit": "bytes",
+        "data_type": "counter",
+    },
+    {
+        "oid": "1.3.6.1.4.1.25461.2.1.2.4.1.1.5",
+        "name": "panIfStatsIfinPkts",
+        "description": "PAN-OS packets received on this interface.",
+        "unit": "packets",
+        "data_type": "counter",
+    },
+    {
+        "oid": "1.3.6.1.4.1.25461.2.1.2.4.1.1.6",
+        "name": "panIfStatsIfoutPkts",
+        "description": "PAN-OS packets transmitted on this interface.",
+        "unit": "packets",
+        "data_type": "counter",
+    },
+    {
+        "oid": "1.3.6.1.4.1.25461.2.1.2.4.1.1.7",
+        "name": "panIfStatsIfinDropPkts",
+        "description": "PAN-OS inbound packets dropped on this interface.",
+        "unit": "packets",
+        "data_type": "counter",
+    },
+    {
+        "oid": "1.3.6.1.4.1.25461.2.1.2.4.1.1.8",
+        "name": "panIfStatsIfoutDropPkts",
+        "description": "PAN-OS outbound packets dropped on this interface.",
+        "unit": "packets",
+        "data_type": "counter",
+    },
+    # GlobalProtect
+    {
+        "oid": "1.3.6.1.4.1.25461.2.1.2.5.1.1.1.2",
+        "name": "panGPGWCurrentUsers",
+        "description": "PAN-OS GlobalProtect Gateway — number of currently connected users.",
+        "unit": "",
+        "data_type": "gauge",
+    },
+    {
+        "oid": "1.3.6.1.4.1.25461.2.1.2.5.1.1.1.3",
+        "name": "panGPGWUtilizationPct",
+        "description": "PAN-OS GlobalProtect Gateway utilization percentage.",
+        "unit": "percent",
+        "data_type": "gauge",
+    },
+
+    # ── Cisco Enterprise MIBs ────────────────────────────────────────────────
+    # CISCO-PROCESS-MIB (cpmCPUTotalTable, indexed by Cisco entity index)
+    {
+        "oid": "1.3.6.1.4.1.9.9.109.1.1.1.1.3.1",
+        "name": "cpmCPUTotal5sec",
+        "description": "Cisco CPU utilization over the last 5 seconds (first CPU, index 1).",
+        "unit": "percent",
+        "data_type": "gauge",
+    },
+    {
+        "oid": "1.3.6.1.4.1.9.9.109.1.1.1.1.4.1",
+        "name": "cpmCPUTotal1min",
+        "description": "Cisco CPU utilization over the last 1 minute (first CPU, index 1).",
+        "unit": "percent",
+        "data_type": "gauge",
+    },
+    {
+        "oid": "1.3.6.1.4.1.9.9.109.1.1.1.1.5.1",
+        "name": "cpmCPUTotal5min",
+        "description": "Cisco CPU utilization over the last 5 minutes (first CPU, index 1).",
+        "unit": "percent",
+        "data_type": "gauge",
+    },
+    # CISCO-MEMORY-POOL-MIB (ciscoMemoryPoolTable, index 1 = DRAM/processor memory)
+    {
+        "oid": "1.3.6.1.4.1.9.9.48.1.1.1.5.1",
+        "name": "ciscoMemoryPoolUsed",
+        "description": "Cisco DRAM memory pool bytes currently in use.",
+        "unit": "bytes",
+        "data_type": "gauge",
+    },
+    {
+        "oid": "1.3.6.1.4.1.9.9.48.1.1.1.6.1",
+        "name": "ciscoMemoryPoolFree",
+        "description": "Cisco DRAM memory pool bytes currently free.",
+        "unit": "bytes",
+        "data_type": "gauge",
+    },
+    {
+        "oid": "1.3.6.1.4.1.9.9.48.1.1.1.8.1",
+        "name": "ciscoMemoryPoolLargestFree",
+        "description": "Cisco DRAM memory pool — largest contiguous free block in bytes.",
+        "unit": "bytes",
+        "data_type": "gauge",
+    },
+    # CISCO-ENVMON-MIB — temperature, fans, power supply
+    {
+        "oid": "1.3.6.1.4.1.9.9.13.1.3.1.3.1",
+        "name": "ciscoEnvMonTemperatureValue",
+        "description": "Cisco environmental monitor — current temperature reading (degrees C, sensor index 1).",
+        "unit": "Cel",
+        "data_type": "gauge",
+    },
+    {
+        "oid": "1.3.6.1.4.1.9.9.13.1.4.1.3.1",
+        "name": "ciscoEnvMonFanState",
+        "description": "Cisco environmental monitor fan state (1=normal, 2=warning, 3=critical, 4=shutdown, 5=notPresent, 6=notFunctioning).",
+        "unit": "",
+        "data_type": "gauge",
+    },
+    {
+        "oid": "1.3.6.1.4.1.9.9.13.1.5.1.3.1",
+        "name": "ciscoEnvMonSupplyState",
+        "description": "Cisco environmental monitor power supply state (1=normal, 2=warning, 3=critical, 4=shutdown, 5=notPresent, 6=notFunctioning).",
+        "unit": "",
+        "data_type": "gauge",
+    },
+    # CISCO-STACK-MIB / VSS — stack member status
+    {
+        "oid": "1.3.6.1.4.1.9.9.500.1.2.1.1.3.1",
+        "name": "cvssSwitchCapabilities",
+        "description": "Cisco VSS — Virtual Switching System switch capabilities bitmask.",
+        "unit": "",
+        "data_type": "gauge",
+    },
+    # Cisco remote-access VPN sessions (CISCO-REMOTE-ACCESS-MONITOR-MIB)
+    {
+        "oid": "1.3.6.1.4.1.9.9.392.1.3.1.0",
+        "name": "crasNumDeclinedSessions",
+        "description": "Cisco ASA/VPN — total number of VPN sessions that were declined.",
+        "unit": "",
+        "data_type": "counter",
+    },
+    {
+        "oid": "1.3.6.1.4.1.9.9.392.1.3.21.0",
+        "name": "crasNumActiveSessions",
+        "description": "Cisco ASA/VPN — number of currently active remote-access VPN sessions.",
+        "unit": "",
+        "data_type": "gauge",
+    },
+
     # ── Additional commonly-polled OIDs ─────────────────────────────────────
     {
         "oid": "1.3.6.1.2.1.4.4.0",
