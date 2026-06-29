@@ -1,20 +1,21 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api, SnmpDashboard, SnmpDevice } from '../api/client'
+import {
+  api, SnmpDashboard,
+  EnvironmentNode, OrgTreeNode, GroupTreeNode, SiteTreeNode, DeviceTreeNode,
+} from '../api/client'
 import { useAutoRefresh } from '../store/autoRefresh'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function fmtTime(ts: string): string {
-  return new Date(ts).toLocaleString([], {
-    month: 'short', day: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  })
-}
-
-function fmtHour(iso: string): string {
-  const d = new Date(iso)
-  return d.getHours().toString().padStart(2, '0') + ':00'
+function fmtRelative(ts: string | null): string {
+  if (!ts) return '—'
+  const utc = ts.includes('T') || ts.endsWith('Z') ? ts : ts.replace(' ', 'T') + 'Z'
+  const secs = Math.floor((Date.now() - new Date(utc).getTime()) / 1000)
+  if (secs < 60)    return `${secs}s ago`
+  if (secs < 3600)  return `${Math.floor(secs / 60)}m ago`
+  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`
+  return `${Math.floor(secs / 86400)}d ago`
 }
 
 // ── Stat card ─────────────────────────────────────────────────────────────────
@@ -39,150 +40,293 @@ function StatCard({
   )
 }
 
-// ── Trap timeline bar chart (SVG, no library) ─────────────────────────────────
+// ── Collapse/expand signal ────────────────────────────────────────────────────
 
-function TrapTimeline({ data }: { data: Array<{ hour: string; count: number }> }) {
-  // Build 24 full hourly buckets
-  const now = new Date()
-  const buckets: Array<{ label: string; count: number }> = []
-  for (let i = 23; i >= 0; i--) {
-    const d = new Date(now)
-    d.setMinutes(0, 0, 0)
-    d.setHours(d.getHours() - i)
-    const isoHour = d.toISOString().slice(0, 13)   // "2024-01-01T14"
-    const match = data.find(r => r.hour.slice(0, 13) === isoHour)
-    buckets.push({ label: fmtHour(d.toISOString()), count: match?.count ?? 0 })
-  }
+// Increment seq to broadcast a collapse/expand to all nodes.
+type CollapseSignal = { expanded: boolean; seq: number }
 
-  const maxCount = Math.max(...buckets.map(b => b.count), 1)
-  const W = 680
-  const H = 120
-  const barW = Math.floor(W / 24) - 2
-  const padL = 4
+function useCollapseSync(signal: CollapseSignal, init = true) {
+  const [expanded, setExpanded] = useState(init)
+  const seenSeq = useRef(-1)
+  useEffect(() => {
+    if (signal.seq !== seenSeq.current) {
+      seenSeq.current = signal.seq
+      setExpanded(signal.expanded)
+    }
+  }, [signal])
+  return [expanded, setExpanded] as const
+}
 
-  const hasData = buckets.some(b => b.count > 0)
+// ── Alert badge ───────────────────────────────────────────────────────────────
 
+function AlertBadge({ count, isDown }: { count: number; isDown?: boolean }) {
+  if (count === 0) return null
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
-      <div className="flex items-center justify-between mb-4">
-        <p className="text-sm font-medium text-white">Trap volume — last 24 hours</p>
-        {hasData && (
-          <span className="text-xs text-gray-500">{buckets.reduce((s, b) => s + b.count, 0).toLocaleString()} total</span>
-        )}
-      </div>
+    <span className={`flex-shrink-0 text-xs font-medium px-2 py-0.5 rounded-full ${
+      isDown
+        ? 'bg-red-500/20 text-red-400 border border-red-500/40'
+        : 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/40'
+    }`}>
+      {count} alert{count !== 1 ? 's' : ''}
+    </span>
+  )
+}
 
-      {!hasData ? (
-        <div className="flex items-center justify-center h-32 text-gray-600 text-sm">
-          No trap data in the last 24 hours
-        </div>
-      ) : (
-        <div className="overflow-x-auto">
-          <svg viewBox={`0 0 ${W} ${H + 20}`} className="w-full" style={{ minWidth: 400 }}>
-            {buckets.map((b, i) => {
-              const barH = b.count === 0 ? 2 : Math.max(4, Math.round((b.count / maxCount) * H))
-              const x = padL + i * (barW + 2)
-              const y = H - barH
-              const showLabel = i === 0 || i === 6 || i === 12 || i === 18 || i === 23
-              return (
-                <g key={i}>
-                  <rect
-                    x={x} y={y} width={barW} height={barH}
-                    rx="2"
-                    fill={b.count === 0 ? '#1f2937' : '#3b82f6'}
-                    opacity={b.count === 0 ? 0.4 : 0.85}
-                  >
-                    <title>{b.label}: {b.count} trap{b.count !== 1 ? 's' : ''}</title>
-                  </rect>
-                  {showLabel && (
-                    <text
-                      x={x + barW / 2} y={H + 16}
-                      textAnchor="middle"
-                      fontSize="9"
-                      fill="#6b7280"
-                    >
-                      {b.label}
-                    </text>
-                  )}
-                </g>
-              )
-            })}
-          </svg>
+// ── OrgNode ───────────────────────────────────────────────────────────────────
+
+function OrgNode({
+  node, signal, onNavigate,
+}: {
+  node: OrgTreeNode; signal: CollapseSignal; onNavigate: (n: DeviceTreeNode) => void
+}) {
+  const [expanded, setExpanded] = useCollapseSync(signal)
+  const st = subtreeStatus(node.children)
+  return (
+    <div>
+      <div
+        className="flex items-center gap-2 px-4 py-3 bg-gray-800/70 border-b border-gray-700/60 cursor-pointer hover:bg-gray-800 transition-colors"
+        onClick={() => setExpanded(x => !x)}
+      >
+        <span className="text-xs text-gray-400 w-4 flex-shrink-0">{expanded ? '▾' : '▸'}</span>
+        <span className="relative flex-shrink-0">
+          <span className={`w-2.5 h-2.5 rounded-full block ${subtreeDotColor(st)}`} />
+          {(st === 'down' || st === 'alerts') && (
+            <span className={`absolute inset-0 rounded-full animate-ping opacity-60 ${st === 'down' ? 'bg-red-500' : 'bg-yellow-400'}`} />
+          )}
+        </span>
+        <span className="text-sm font-bold text-white tracking-wide">{node.name}</span>
+        <span className="text-xs text-gray-500 ml-1">org</span>
+        <div className="flex-1" />
+        <AlertBadge count={node.subtree_alerts} />
+      </div>
+      {expanded && node.children.map(child => (
+        <EnvironmentNodeComp
+          key={child.type === 'device' ? child.id : `${child.type}-${child.name}`}
+          node={child} signal={signal} onNavigate={onNavigate}
+        />
+      ))}
+    </div>
+  )
+}
+
+// ── GroupNode ─────────────────────────────────────────────────────────────────
+
+function GroupNode({
+  node, signal, onNavigate,
+}: {
+  node: GroupTreeNode; signal: CollapseSignal; onNavigate: (n: DeviceTreeNode) => void
+}) {
+  const [expanded, setExpanded] = useCollapseSync(signal)
+  const st = subtreeStatus(node.children)
+  return (
+    <div>
+      <div
+        className="flex items-center gap-2 pl-8 pr-4 py-2.5 bg-gray-800/40 border-b border-gray-800/60 cursor-pointer hover:bg-gray-800/60 transition-colors"
+        onClick={() => setExpanded(x => !x)}
+      >
+        <span className="text-xs text-gray-500 w-4 flex-shrink-0">{expanded ? '▾' : '▸'}</span>
+        <span className="relative flex-shrink-0">
+          <span className={`w-2 h-2 rounded-full block ${subtreeDotColor(st)}`} />
+          {(st === 'down' || st === 'alerts') && (
+            <span className={`absolute inset-0 rounded-full animate-ping opacity-60 ${st === 'down' ? 'bg-red-500' : 'bg-yellow-400'}`} />
+          )}
+        </span>
+        <span className="text-sm font-semibold text-gray-200">{node.name}</span>
+        <span className="text-xs text-gray-600 ml-1">group</span>
+        <div className="flex-1" />
+        <AlertBadge count={node.subtree_alerts} />
+      </div>
+      {expanded && node.children.map(child => (
+        <EnvironmentNodeComp
+          key={child.type === 'device' ? child.id : `${child.type}-${child.name}`}
+          node={child} signal={signal} onNavigate={onNavigate}
+        />
+      ))}
+    </div>
+  )
+}
+
+// ── SiteNode ──────────────────────────────────────────────────────────────────
+
+function SiteNode({
+  node, signal, onNavigate,
+}: {
+  node: SiteTreeNode; signal: CollapseSignal; onNavigate: (n: DeviceTreeNode) => void
+}) {
+  const [expanded, setExpanded] = useCollapseSync(signal)
+  const st = subtreeStatus(node.children)
+  return (
+    <div>
+      <div
+        className="flex items-center gap-2 pl-12 pr-4 py-2 border-b border-gray-800/40 cursor-pointer hover:bg-gray-800/20 transition-colors"
+        onClick={() => setExpanded(x => !x)}
+      >
+        <span className="text-xs text-gray-600 w-4 flex-shrink-0">{expanded ? '▾' : '▸'}</span>
+        <span className="relative flex-shrink-0">
+          <span className={`w-2 h-2 rounded-full block ${subtreeDotColor(st)}`} />
+          {(st === 'down' || st === 'alerts') && (
+            <span className={`absolute inset-0 rounded-full animate-ping opacity-60 ${st === 'down' ? 'bg-red-500' : 'bg-yellow-400'}`} />
+          )}
+        </span>
+        <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">{node.name}</span>
+        <span className="text-xs text-gray-700 ml-1">site</span>
+        <div className="flex-1" />
+        <AlertBadge count={node.subtree_alerts} />
+      </div>
+      {expanded && (
+        <div className="border-l border-gray-800/50 ml-[52px]">
+          {node.children.map(child => (
+            <EnvironmentNodeComp
+              key={child.type === 'device' ? child.id : `${child.type}-${child.name}`}
+              node={child} signal={signal} onNavigate={onNavigate}
+            />
+          ))}
         </div>
       )}
     </div>
   )
 }
 
-// ── Device status grid ────────────────────────────────────────────────────────
+// ── DeviceNode ────────────────────────────────────────────────────────────────
 
-const HA_BADGE: Record<string, string> = {
-  active:  'bg-blue-900/40 text-blue-300 border-blue-700/50',
-  passive: 'bg-amber-900/40 text-amber-300 border-amber-700/50',
+function dotColor(node: DeviceTreeNode): string {
+  if (!node.enabled)               return 'bg-gray-600'
+  if (node.status === 'down')      return 'bg-red-500'
+  if (node.subtree_alerts > 0)     return 'bg-yellow-400'
+  if (node.status === 'up')        return 'bg-green-500'
+  return 'bg-gray-500'
 }
 
-function devDot(d: SnmpDevice): string {
-  if (!d.enabled) return 'bg-gray-600'
-  if (d.ha_role === 'passive') return 'bg-amber-400'
-  const m: Record<string, string> = { up: 'bg-green-500', down: 'bg-red-500' }
-  return m[d.status] ?? 'bg-gray-600'
+function dotPulse(node: DeviceTreeNode): boolean {
+  return node.enabled && (node.status === 'down' || node.subtree_alerts > 0)
 }
 
-function devLabel(d: SnmpDevice): { text: string; cls: string } {
-  if (!d.enabled) return { text: 'disabled', cls: 'text-gray-600' }
-  if (d.ha_role === 'passive') return { text: 'standby', cls: 'text-amber-400' }
-  const m: Record<string, string> = { up: 'text-green-400', down: 'text-red-400' }
-  return { text: d.status ?? 'unknown', cls: m[d.status] ?? 'text-gray-500' }
+// ── Subtree status helpers ─────────────────────────────────────────────────────
+
+type SubtreeStatus = 'down' | 'alerts' | 'up' | 'unknown'
+
+function subtreeStatus(nodes: EnvironmentNode[]): SubtreeStatus {
+  let best: SubtreeStatus = 'unknown'
+  for (const n of nodes) {
+    if (n.type === 'device') {
+      if (!n.enabled) continue
+      if (n.status === 'down') return 'down'
+      if (n.subtree_alerts > 0) best = 'alerts'
+      else if (n.status === 'up' && best === 'unknown') best = 'up'
+    } else {
+      const cs = subtreeStatus(n.children)
+      if (cs === 'down') return 'down'
+      if (cs === 'alerts') best = 'alerts'
+      else if (cs === 'up' && best === 'unknown') best = 'up'
+    }
+  }
+  return best
 }
 
-function DeviceGrid({ devices, loading }: { devices: SnmpDevice[]; loading: boolean }) {
-  const navigate = useNavigate()
+function subtreeDotColor(st: SubtreeStatus): string {
+  if (st === 'down')   return 'bg-red-500'
+  if (st === 'alerts') return 'bg-yellow-400'
+  if (st === 'up')     return 'bg-green-500'
+  return 'bg-gray-600'
+}
+
+function subtreeDotPulse(st: SubtreeStatus): boolean {
+  return st === 'down' || st === 'alerts'
+}
+
+function DeviceNode({
+  node, depth, signal, onNavigate,
+}: {
+  node: DeviceTreeNode; depth: number
+  signal: CollapseSignal; onNavigate: (n: DeviceTreeNode) => void
+}) {
+  const [expanded, setExpanded] = useCollapseSync(signal)
+  const hasChildren = node.children.length > 0
+  const isAlerting  = node.subtree_alerts > 0 || node.status === 'down'
+
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-      <div className="px-5 py-3 border-b border-gray-800 flex items-center justify-between">
-        <p className="text-sm font-medium text-white">Devices</p>
+    <div>
+      <div
+        className={`flex items-center gap-2 py-2.5 hover:bg-gray-800/40 transition-colors cursor-pointer group ${isAlerting ? 'bg-red-950/10' : ''}`}
+        style={{ paddingLeft: `${16 + depth * 20}px` }}
+        onClick={() => onNavigate(node)}
+      >
+        {/* Expand toggle */}
         <button
-          onClick={() => navigate('/devices')}
-          className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+          className={`flex-shrink-0 w-5 h-5 flex items-center justify-center rounded hover:bg-gray-700/60 transition-colors text-gray-500 hover:text-gray-300 ${!hasChildren ? 'invisible' : ''}`}
+          onClick={e => { e.stopPropagation(); setExpanded(x => !x) }}
         >
-          Manage →
+          <span className="text-xs leading-none">{expanded ? '▾' : '▸'}</span>
         </button>
-      </div>
-      {loading ? (
-        <div className="px-5 py-8 text-sm text-gray-500">Loading…</div>
-      ) : devices.length === 0 ? (
-        <div className="px-5 py-8 text-sm text-gray-500">
-          No devices configured.{' '}
-          <button onClick={() => navigate('/devices')} className="text-blue-400 hover:text-blue-300">Add one →</button>
+
+        {/* Status dot */}
+        <span className="relative flex-shrink-0">
+          <span className={`w-2.5 h-2.5 rounded-full block ${dotColor(node)}`} />
+          {dotPulse(node) && (
+            <span className={`absolute inset-0 rounded-full animate-ping opacity-60 ${node.status === 'down' ? 'bg-red-500' : 'bg-yellow-400'}`} />
+          )}
+        </span>
+
+        {/* Name + IP */}
+        <div className="min-w-0 flex-1">
+          <span className={`text-sm font-medium truncate ${node.enabled ? 'text-white' : 'text-gray-500'}`}>
+            {node.name}
+          </span>
+          {node.device_type && (
+            <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-gray-800/60 text-gray-500 border border-gray-700/50">
+              {node.device_type.replace('_', ' ')}
+            </span>
+          )}
+          {node.ha_role && (
+            <span className={`ml-2 text-xs font-medium px-1.5 py-0.5 rounded ${
+              node.ha_role === 'active'
+                ? 'bg-blue-900/40 text-blue-300 border border-blue-700/40'
+                : 'bg-gray-800 text-gray-500 border border-gray-700'
+            }`}>
+              {node.ha_role}
+            </span>
+          )}
+          <span className="text-xs text-gray-500 ml-2 font-mono">{node.ip}</span>
         </div>
-      ) : (
-        <div className="divide-y divide-gray-800/50">
-          {devices.map(d => {
-            const { text: stText, cls: stCls } = devLabel(d)
+
+        {/* Alert badge */}
+        {node.subtree_alerts > 0 && (
+          <span className={`flex-shrink-0 text-xs font-medium px-2 py-0.5 rounded-full ${
+            node.status === 'down'
+              ? 'bg-red-500/20 text-red-400 border border-red-500/40'
+              : 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/40'
+          }`}>
+            {node.direct_alerts > 0 && node.subtree_alerts > node.direct_alerts
+              ? `${node.direct_alerts} + ${node.subtree_alerts - node.direct_alerts} below`
+              : node.subtree_alerts > node.direct_alerts
+              ? `${node.subtree_alerts} below`
+              : node.subtree_alerts === 1 ? '1 alert' : `${node.subtree_alerts} alerts`
+            }
+          </span>
+        )}
+
+        {/* Last seen */}
+        <span className="flex-shrink-0 text-xs text-gray-600 hidden lg:block w-16 text-right pr-4">
+          {fmtRelative(node.last_seen)}
+        </span>
+
+        {/* Arrow */}
+        <span className="flex-shrink-0 text-gray-700 group-hover:text-gray-400 transition-colors text-xs pr-4">›</span>
+      </div>
+
+      {/* Children */}
+      {hasChildren && expanded && (
+        <div className="border-l border-gray-800/60 ml-[29px]">
+          {node.children.map(child => {
+            if (child.type !== 'device') return null
             return (
-              <div key={d.id} className="px-5 py-3 flex items-center gap-3 hover:bg-gray-800/30 transition-colors">
-                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${devDot(d)}`} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <p className={`text-sm truncate ${d.enabled ? 'text-white' : 'text-gray-500'}`}>
-                      {d.name || d.ip}
-                    </p>
-                    {d.ha_role && (
-                      <span className={`text-[10px] font-medium border rounded px-1.5 py-0.5 flex-shrink-0 ${HA_BADGE[d.ha_role] ?? 'bg-gray-800 text-gray-400 border-gray-700'}`}>
-                        HA {d.ha_role}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs text-gray-500">
-                    {d.site || d.collector_name || d.ip}
-                  </p>
-                </div>
-                <div className="flex-shrink-0 text-right">
-                  <p className={`text-xs font-medium capitalize ${stCls}`}>{stText}</p>
-                  {d.last_seen && (
-                    <p className="text-xs text-gray-600">{fmtTime(d.last_seen)}</p>
-                  )}
-                </div>
-              </div>
+              <DeviceNode
+                key={child.id}
+                node={child}
+                depth={depth + 1}
+                signal={signal}
+                onNavigate={onNavigate}
+              />
             )
           })}
         </div>
@@ -191,70 +335,92 @@ function DeviceGrid({ devices, loading }: { devices: SnmpDevice[]; loading: bool
   )
 }
 
-// ── Top trap sources ──────────────────────────────────────────────────────────
+// ── Dispatcher ────────────────────────────────────────────────────────────────
 
-function TopSources({ sources }: { sources: Array<{ source_ip: string; count: number }> }) {
-  const max = Math.max(...sources.map(s => s.count), 1)
-  return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-      <div className="px-5 py-3 border-b border-gray-800">
-        <p className="text-sm font-medium text-white">Top trap sources — 24h</p>
-      </div>
-      {sources.length === 0 ? (
-        <div className="px-5 py-8 text-sm text-gray-500">No trap data</div>
-      ) : (
-        <div className="divide-y divide-gray-800/50">
-          {sources.map((s, i) => (
-            <div key={i} className="px-5 py-3">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-mono text-white">{s.source_ip}</span>
-                <span className="text-xs text-gray-400">{s.count.toLocaleString()}</span>
-              </div>
-              <div className="h-1 bg-gray-800 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-blue-500 rounded-full"
-                  style={{ width: `${(s.count / max) * 100}%` }}
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
+function EnvironmentNodeComp({
+  node, signal, onNavigate,
+}: {
+  node: EnvironmentNode; signal: CollapseSignal; onNavigate: (n: DeviceTreeNode) => void
+}) {
+  if (node.type === 'org')    return <OrgNode   node={node} signal={signal} onNavigate={onNavigate} />
+  if (node.type === 'group')  return <GroupNode  node={node} signal={signal} onNavigate={onNavigate} />
+  if (node.type === 'site')   return <SiteNode   node={node} signal={signal} onNavigate={onNavigate} />
+  return <DeviceNode node={node} depth={0} signal={signal} onNavigate={onNavigate} />
 }
 
-// ── Recent traps ──────────────────────────────────────────────────────────────
+// ── EnvironmentTree ───────────────────────────────────────────────────────────
 
-function RecentTraps({ traps }: { traps: Array<{ received_at: string; source_ip: string; trap_oid: string; snmp_version: string }> }) {
+function countDevices(nodes: EnvironmentNode[]): number {
+  return nodes.reduce((s, n) => {
+    const own = n.type === 'device' ? 1 : 0
+    return s + own + countDevices(n.children)
+  }, 0)
+}
+
+function EnvironmentTree({ nodes, loading }: { nodes: EnvironmentNode[]; loading: boolean }) {
+  const navigate = useNavigate()
+  const [signal, setSignal] = useState<CollapseSignal>({ expanded: true, seq: 0 })
+
+  const handleNavigate = (node: DeviceTreeNode) => {
+    if (node.subtree_alerts > 0) navigate('/alerts')
+    else navigate('/devices')
+  }
+
+  const totalDevices  = countDevices(nodes)
+  const totalAlerting = nodes.reduce((s, n) => s + n.subtree_alerts, 0)
+
+  const collapseAll = () => setSignal(s => ({ expanded: false, seq: s.seq + 1 }))
+  const expandAll   = () => setSignal(s => ({ expanded: true,  seq: s.seq + 1 }))
+
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-      <div className="px-5 py-3 border-b border-gray-800">
-        <p className="text-sm font-medium text-white">Recent traps</p>
+    <div className={`bg-gray-900 rounded-xl overflow-hidden border ${totalAlerting > 0 ? 'border-red-500' : 'border-gray-800'}`}>
+      {/* Header */}
+      <div className={`px-5 py-3 border-b flex items-center justify-between ${totalAlerting > 0 ? 'border-red-500/60 bg-red-500/5' : 'border-gray-800'}`}>
+        <div className="flex items-center gap-3">
+          <p className="text-sm font-medium text-white">Environment</p>
+          {!loading && (
+            <span className="text-xs text-gray-500">{totalDevices} device{totalDevices !== 1 ? 's' : ''}</span>
+          )}
+          {totalAlerting > 0 && (
+            <span className="text-xs font-bold text-red-400">{totalAlerting} alerting</span>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          {!loading && nodes.length > 0 && (
+            <>
+              <button onClick={collapseAll} className="text-xs text-gray-500 hover:text-gray-300 transition-colors">
+                Collapse all
+              </button>
+              <button onClick={expandAll} className="text-xs text-gray-500 hover:text-gray-300 transition-colors">
+                Expand all
+              </button>
+            </>
+          )}
+          <button onClick={() => navigate('/devices')} className="text-xs text-gray-500 hover:text-gray-300 transition-colors">
+            Manage →
+          </button>
+        </div>
       </div>
-      {traps.length === 0 ? (
-        <div className="px-5 py-8 text-sm text-gray-500">No traps received yet</div>
+
+      {/* Content */}
+      {loading ? (
+        <div className="px-5 py-8 text-sm text-gray-500">Loading…</div>
+      ) : nodes.length === 0 ? (
+        <div className="px-5 py-8 text-sm text-gray-500">
+          No devices configured.{' '}
+          <button onClick={() => navigate('/devices')} className="text-blue-400 hover:text-blue-300">Add one →</button>
+        </div>
       ) : (
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="border-b border-gray-800">
-              <th className="px-5 py-2 text-left text-gray-500 font-normal">Time</th>
-              <th className="px-5 py-2 text-left text-gray-500 font-normal">Source</th>
-              <th className="px-5 py-2 text-left text-gray-500 font-normal">OID</th>
-              <th className="px-5 py-2 text-left text-gray-500 font-normal">Ver</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-800/50">
-            {traps.map((t, i) => (
-              <tr key={i} className="hover:bg-gray-800/30 transition-colors">
-                <td className="px-5 py-2 text-gray-400 whitespace-nowrap">{fmtTime(t.received_at)}</td>
-                <td className="px-5 py-2 font-mono text-white">{t.source_ip || '—'}</td>
-                <td className="px-5 py-2 font-mono text-gray-300 max-w-[200px] truncate" title={t.trap_oid}>{t.trap_oid || '—'}</td>
-                <td className="px-5 py-2 text-gray-500">{t.snmp_version || '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="divide-y divide-gray-800/30">
+          {nodes.map(node => (
+            <EnvironmentNodeComp
+              key={node.type === 'device' ? node.id : `${node.type}-${node.name}`}
+              node={node}
+              signal={signal}
+              onNavigate={handleNavigate}
+            />
+          ))}
+        </div>
       )}
     </div>
   )
@@ -271,17 +437,14 @@ const EMPTY_DASH: SnmpDashboard = {
 export default function Dashboard() {
   const navigate = useNavigate()
   const [dash, setDash]       = useState<SnmpDashboard>(EMPTY_DASH)
-  const [devices, setDevices] = useState<SnmpDevice[]>([])
+  const [tree, setTree]       = useState<EnvironmentNode[]>([])
   const [loading, setLoading] = useState(true)
 
   const load = async () => {
     try {
-      const [d, devs] = await Promise.all([
-        api.getSnmpDashboard(),
-        api.getSnmpDevices(),
-      ])
+      const [d, t] = await Promise.all([api.getSnmpDashboard(), api.getDeviceTree()])
       setDash(d)
-      setDevices(devs)
+      setTree(t)
     } catch {}
     finally { setLoading(false) }
   }
@@ -294,13 +457,11 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-5">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-white">Dashboard</h1>
         <p className="text-xs text-gray-600">Auto-refreshes every 30s</p>
       </div>
 
-      {/* Stat cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard
           label="Devices"
@@ -311,7 +472,7 @@ export default function Dashboard() {
         <StatCard
           label="Devices up"
           value={loading ? '…' : devCounts.up}
-          sub={devCounts.total > 0 ? `${devCounts.total > 0 ? Math.round((devCounts.up / devCounts.total) * 100) : 0}% reachable` : undefined}
+          sub={devCounts.total > 0 ? `${Math.round((devCounts.up / devCounts.total) * 100)}% reachable` : undefined}
         />
         <StatCard
           label="Traps (24h)"
@@ -325,17 +486,7 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* Trap timeline */}
-      <TrapTimeline data={dash.trap_timeline} />
-
-      {/* Device grid + Top sources */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        <DeviceGrid devices={devices} loading={loading} />
-        <TopSources sources={dash.top_sources} />
-      </div>
-
-      {/* Recent traps */}
-      <RecentTraps traps={dash.recent_traps} />
+      <EnvironmentTree nodes={tree} loading={loading} />
     </div>
   )
 }
