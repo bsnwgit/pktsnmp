@@ -1286,6 +1286,298 @@ async def device_latest(device_id: int, _: CurrentUser, db: aiosqlite.Connection
 
 
 # =============================================================================
+# METRICS API (charts, Metrics page, alert engine)
+# =============================================================================
+
+def _parse_since(since: str | None) -> tuple[str | None, int]:
+    """Parse a 'since' string into (iso_datetime, bucket_seconds).
+
+    Accepts relative shortcuts ("1h", "6h", "24h", "7d") or an ISO datetime.
+    Returns (since_iso, bucket_seconds) where bucket_seconds drives downsampling:
+      1h  → raw (0)      6h → 5-min (300)
+      24h → 15-min (900) 7d → 1-hour (3600)
+      custom/long → auto-select based on span
+    """
+    from datetime import datetime, timezone, timedelta
+
+    if not since:
+        return None, 0
+
+    _shortcuts = {
+        "1h":  (timedelta(hours=1),  0),
+        "6h":  (timedelta(hours=6),  300),
+        "24h": (timedelta(hours=24), 900),
+        "7d":  (timedelta(days=7),   3600),
+    }
+    if since in _shortcuts:
+        delta, bucket = _shortcuts[since]
+        iso = (datetime.now(tz=timezone.utc) - delta).isoformat()
+        return iso, bucket
+
+    # Treat as ISO datetime — auto-compute bucket from span
+    try:
+        dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        span_hours = (datetime.now(tz=timezone.utc) - dt).total_seconds() / 3600
+        if span_hours <= 1.5:
+            bucket = 0
+        elif span_hours <= 8:
+            bucket = 300
+        elif span_hours <= 30:
+            bucket = 900
+        else:
+            bucket = 3600
+        return dt.isoformat(), bucket
+    except Exception:
+        return None, 0
+
+
+@router.get("/devices/{device_id}/metrics/latest")
+async def device_metrics_latest(
+    device_id: int,
+    _: CurrentUser,
+    db: aiosqlite.Connection = Depends(get_db),
+) -> list[dict]:
+    """Latest value per OID for a registered device.
+    Used by the Dashboard mini-panel and Metrics page header stats.
+    """
+    db.row_factory = aiosqlite.Row
+    async with db.execute("SELECT id, ip FROM devices WHERE id=?", (device_id,)) as cur:
+        row = await cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Device not found")
+    from app.storage.factory import get_storage
+    return await get_storage().get_device_latest(device_id)
+
+
+@router.get("/devices/{device_id}/metrics/history")
+async def device_metrics_history(
+    device_id: int,
+    _: CurrentUser,
+    db: aiosqlite.Connection = Depends(get_db),
+    oid_labels: str | None = Query(None, description="Comma-separated OID labels; omit for all"),
+    since: str | None = Query("1h", description="Relative: 1h|6h|24h|7d, or ISO datetime"),
+    until: str | None = Query(None, description="ISO datetime upper bound (default: now)"),
+    format: str | None = Query(None, description="'csv' to download as CSV"),
+    limit: int = Query(2000, ge=1, le=10000),
+    if_index: int | None = Query(None, description="Legacy: ignored (oid column is NULL)"),
+    interface_label: str | None = Query(None, description="Filter to a specific interface (ifDescr value)"),
+) -> Any:
+    """Time-bucketed SNMP poll history for chart rendering.
+
+    Response shape:
+    {
+      "series": [ { "bucket_ts", "oid_label", "avg_value", "max_value", "min_value", "sample_count" }, ... ],
+      "alert_events": [ { "id", "fired_at", "severity", "message", "rule_name" }, ... ],
+      "trap_events":  [ { "id", "received_at", "trap_oid", "source_ip" }, ... ],
+      "bucket_seconds": 0 | 300 | 900 | 3600,
+      "since_iso": "...",
+    }
+    """
+    from fastapi.responses import StreamingResponse
+    import csv as _csv, io as _io
+
+    db.row_factory = aiosqlite.Row
+    async with db.execute("SELECT id, ip FROM devices WHERE id=?", (device_id,)) as cur:
+        row = await cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    device_ip = dict(row)["ip"]
+    since_iso, bucket_seconds = _parse_since(since)
+    labels = [l.strip() for l in oid_labels.split(",")] if oid_labels else None
+
+    from app.storage.factory import get_storage
+    storage = get_storage()
+
+    series = await storage.query_poll_history_bucketed(
+        device_id=device_id,
+        oid_labels=labels,
+        since_iso=since_iso,
+        until_iso=until,
+        bucket_seconds=bucket_seconds,
+        limit=limit,
+        interface_label=interface_label,
+    )
+
+    # Companion: alert events in the same time window
+    alert_events: list[dict] = []
+    ae_conditions = ["ae.device_id = ?"]
+    ae_params: list[Any] = [device_id]
+    if since_iso:
+        ae_conditions.append("ae.fired_at >= ?")
+        ae_params.append(since_iso)
+    if until:
+        ae_conditions.append("ae.fired_at <= ?")
+        ae_params.append(until)
+    ae_where = "WHERE " + " AND ".join(ae_conditions)
+    async with db.execute(
+        f"""SELECT ae.id, ae.fired_at, ae.severity, ae.message, ae.resolved_at,
+                   ae.auto_resolved, ar.name AS rule_name
+            FROM alert_events ae
+            JOIN alert_rules ar ON ar.id = ae.rule_id
+            {ae_where}
+            ORDER BY ae.fired_at ASC LIMIT 500""",
+        ae_params,
+    ) as cur:
+        alert_events = [dict(r) for r in await cur.fetchall()]
+
+    # Companion: trap events in the same time window
+    trap_events = await storage.query_trap_events(
+        device_id=device_id,
+        since_iso=since_iso,
+        until_iso=until,
+        limit=200,
+    )
+
+    if format == "csv":
+        buf = _io.StringIO()
+        writer = _csv.writer(buf)
+        writer.writerow(["bucket_ts", "oid_label", "avg_value", "max_value", "min_value", "sample_count"])
+        for row in series:
+            writer.writerow([row["bucket_ts"], row["oid_label"], row["avg_value"],
+                             row["max_value"], row["min_value"], row["sample_count"]])
+        buf.seek(0)
+        return StreamingResponse(
+            _io.BytesIO(buf.getvalue().encode("utf-8")),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="device-{device_id}-metrics.csv"'},
+        )
+
+    return {
+        "series": series,
+        "alert_events": alert_events,
+        "trap_events": trap_events,
+        "bucket_seconds": bucket_seconds,
+        "since_iso": since_iso,
+    }
+
+
+@router.get("/devices/by-ip/{device_ip:path}/metrics/latest")
+async def device_metrics_latest_by_ip(
+    device_ip: str,
+    _: CurrentUser,
+) -> list[dict]:
+    """Latest values for unregistered devices (dental path labels, etc.).
+    Used when device_id is not known.
+    """
+    from app.storage.factory import get_storage
+    return await get_storage().get_device_latest_by_ip(device_ip)
+
+
+@router.get("/collectors/{collector_id}/ingest-rate")
+async def collector_ingest_rate(
+    collector_id: int,
+    _: CurrentUser,
+    db: aiosqlite.Connection = Depends(get_db),
+    hours: int = Query(1, ge=1, le=24),
+    bucket_minutes: int = Query(5, ge=1, le=60),
+) -> list[dict]:
+    """Polls-per-bucket sparkline for the Collectors page health view.
+
+    Returns: [ { "bucket_ts", "poll_count", "active_devices" }, ... ]
+    """
+    db.row_factory = aiosqlite.Row
+    async with db.execute("SELECT id FROM collectors WHERE id=?", (collector_id,)) as cur:
+        if not await cur.fetchone():
+            raise HTTPException(status_code=404, detail="Collector not found")
+    from app.storage.factory import get_storage
+    return await get_storage().get_ingest_rate(
+        collector_id=collector_id, hours=hours, bucket_minutes=bucket_minutes
+    )
+
+
+@router.get("/metrics/overview")
+async def metrics_overview(
+    _: CurrentUser,
+    db: aiosqlite.Connection = Depends(get_db),
+) -> list[dict]:
+    """All-device metrics overview for the dashboard cards view.
+
+    Returns ALL registered devices regardless of whether they have SNMP data.
+    No-data devices are included with has_data=false so missing data is visible.
+
+    Response per item:
+    {
+      "device": { id, name, ip, device_type, status, org, groups, site, enabled, last_seen },
+      "latest": { "<oid_label>": { value, value_numeric, value_type, polled_at }, ... },
+      "has_data": true|false,
+      "interface_count": N,
+    }
+    """
+    db.row_factory = aiosqlite.Row
+    async with db.execute(
+        """SELECT id, name, ip, device_type, status, org, groups, site, enabled, last_seen
+           FROM devices
+           ORDER BY org ASC, name ASC"""
+    ) as cur:
+        device_rows = await cur.fetchall()
+
+    devices = [dict(r) for r in device_rows]
+    if not devices:
+        return []
+
+    device_ids = [d["id"] for d in devices]
+    from app.storage.factory import get_storage
+    storage = get_storage()
+
+    # Single batch query for all devices' latest metrics
+    batch = await storage.get_all_devices_latest(device_ids)
+
+    result = []
+    for dev in devices:
+        did = dev["id"]
+        latest_rows = batch.get(did, [])
+        latest: dict[str, dict] = {
+            row["oid_label"]: {
+                "value":         row["value"],
+                "value_numeric": row["value_numeric"],
+                "value_type":    row["value_type"],
+                "polled_at":     row["polled_at"],
+            }
+            for row in latest_rows
+        }
+        # Count distinct interfaces from the OID labels present in the latest snapshot.
+        # Any OID whose label is an IF-MIB leaf implies at least one interface; the true
+        # count comes from GET /devices/{id}/interfaces — this is just a quick estimate.
+        if_labels = {k for k in latest if k in (
+            "ifDescr", "ifAlias", "ifName",
+            "ifOperStatus", "ifOperStatusMetric",
+            "ifInOctets", "ifOutOctets",
+        )}
+        result.append({
+            "device":          dev,
+            "latest":          latest,
+            "has_data":        len(latest_rows) > 0,
+            "has_interfaces":  len(if_labels) > 0,
+        })
+
+    return result
+
+
+@router.get("/devices/{device_id}/interfaces")
+async def device_interfaces(
+    device_id: int,
+    _: CurrentUser,
+    db: aiosqlite.Connection = Depends(get_db),
+) -> list[dict]:
+    """Interface list for a device.
+
+    otelcol attaches ifDescr/ifName as metric attributes; the parser stores
+    them in the interface_label column. Returns one entry per distinct interface.
+
+    Each interface: { interface_label, name, oper_status, admin_status, speed_mbps, if_type, mac }
+    """
+    db.row_factory = aiosqlite.Row
+    async with db.execute("SELECT id FROM devices WHERE id=?", (device_id,)) as cur:
+        if not await cur.fetchone():
+            raise HTTPException(status_code=404, detail="Device not found")
+    from app.storage.factory import get_storage
+    return await get_storage().get_device_interfaces(device_id)
+
+
+# =============================================================================
 # CLEANUP
 # =============================================================================
 

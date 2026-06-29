@@ -5,6 +5,7 @@ import {
   EnvironmentNode, OrgTreeNode, GroupTreeNode, SiteTreeNode, DeviceTreeNode,
 } from '../api/client'
 import { useAutoRefresh } from '../store/autoRefresh'
+import DeviceMetricsPanel from '../components/DeviceMetricsPanel'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -357,13 +358,18 @@ function countDevices(nodes: EnvironmentNode[]): number {
   }, 0)
 }
 
-function EnvironmentTree({ nodes, loading }: { nodes: EnvironmentNode[]; loading: boolean }) {
+function EnvironmentTree({
+  nodes, loading, onDeviceSelect,
+}: {
+  nodes: EnvironmentNode[]
+  loading: boolean
+  onDeviceSelect: (node: DeviceTreeNode) => void
+}) {
   const navigate = useNavigate()
   const [signal, setSignal] = useState<CollapseSignal>({ expanded: true, seq: 0 })
 
   const handleNavigate = (node: DeviceTreeNode) => {
-    if (node.subtree_alerts > 0) navigate('/alerts')
-    else navigate('/devices')
+    onDeviceSelect(node)
   }
 
   const totalDevices  = countDevices(nodes)
@@ -439,6 +445,7 @@ export default function Dashboard() {
   const [dash, setDash]       = useState<SnmpDashboard>(EMPTY_DASH)
   const [tree, setTree]       = useState<EnvironmentNode[]>([])
   const [loading, setLoading] = useState(true)
+  const [selectedDevice, setSelectedDevice] = useState<DeviceTreeNode | null>(null)
 
   const load = async () => {
     try {
@@ -453,40 +460,59 @@ export default function Dashboard() {
   useEffect(() => { load() }, [tick])
   useEffect(() => { load() }, [])
 
+  // ESC to close panel
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelectedDevice(null) }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
+
   const { devices: devCounts } = dash
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-white">Dashboard</h1>
-        <p className="text-xs text-gray-600">Auto-refreshes every 30s</p>
-      </div>
+    <>
+      {/* Backdrop when panel is open */}
+      {selectedDevice && (
+        <div
+          className="fixed inset-0 z-30 bg-black/40"
+          onClick={() => setSelectedDevice(null)}
+        />
+      )}
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard
-          label="Devices"
-          value={loading ? '…' : devCounts.total}
-          sub={devCounts.total > 0 ? `${devCounts.up} up · ${devCounts.down} down · ${devCounts.unknown} unknown` : undefined}
-          onClick={() => navigate('/devices')}
-        />
-        <StatCard
-          label="Devices up"
-          value={loading ? '…' : devCounts.up}
-          sub={devCounts.total > 0 ? `${Math.round((devCounts.up / devCounts.total) * 100)}% reachable` : undefined}
-        />
-        <StatCard
-          label="Traps (24h)"
-          value={loading ? '…' : dash.traps_24h.toLocaleString()}
-        />
-        <StatCard
-          label="Active Alerts"
-          value={loading ? '…' : dash.active_alerts}
-          accent
-          onClick={dash.active_alerts > 0 ? () => navigate('/alerts') : undefined}
-        />
-      </div>
+      <DeviceMetricsPanel device={selectedDevice} onClose={() => setSelectedDevice(null)} />
 
-      <EnvironmentTree nodes={tree} loading={loading} />
-    </div>
+      <div className="space-y-5">
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-bold text-white">Dashboard</h1>
+          <p className="text-xs text-gray-600">Auto-refreshes every 30s</p>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatCard
+            label="Devices"
+            value={loading ? '…' : devCounts.total}
+            sub={devCounts.total > 0 ? `${devCounts.up} up · ${devCounts.down} down · ${devCounts.unknown} unknown` : undefined}
+            onClick={() => navigate('/devices')}
+          />
+          <StatCard
+            label="Devices up"
+            value={loading ? '…' : devCounts.up}
+            sub={devCounts.total > 0 ? `${Math.round((devCounts.up / devCounts.total) * 100)}% reachable` : undefined}
+          />
+          <StatCard
+            label="Traps (24h)"
+            value={loading ? '…' : dash.traps_24h.toLocaleString()}
+          />
+          <StatCard
+            label="Active Alerts"
+            value={loading ? '…' : dash.active_alerts}
+            accent
+            onClick={dash.active_alerts > 0 ? () => navigate('/alerts') : undefined}
+          />
+        </div>
+
+        <EnvironmentTree nodes={tree} loading={loading} onDeviceSelect={setSelectedDevice} />
+      </div>
+    </>
   )
 }
