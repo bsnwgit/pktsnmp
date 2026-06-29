@@ -94,15 +94,15 @@ otelcol (remote collector)
        └─ POST /api/snmp/ingest/otlp  (bearer token auth)
             └─ parse_otlp_metrics()
             └─ resolve device_id by otelcol_label
-            └─ DuckDB: INSERT INTO snmp_poll_results
+            └─ SQLite: INSERT INTO snmp_poll_results
 
 pysnmp local poller (in-process, local devices only)
   └─ asyncio poll loop → GET per OID per device
-       └─ DuckDB: INSERT INTO snmp_poll_results
+       └─ SQLite: INSERT INTO snmp_poll_results
 
 asyncio trap receiver (UDP 162)
   └─ decode pysnmp trap
-       └─ DuckDB: INSERT INTO snmp_traps
+       └─ SQLite: INSERT INTO snmp_traps
 ```
 
 ---
@@ -112,7 +112,7 @@ asyncio trap receiver (UDP 162)
 | Symptom | Check |
 |---|---|
 | Collector status stays "unknown" | Check the collector is running and the API token matches; verify the OTLP exporter endpoint is reachable |
-| No data in DuckDB | `journalctl -u otelcol` on collector host; check pktsnmp.log on server |
+| No data in SQLite | `journalctl -u otelcol` on collector host; check pktsnmp.log on server |
 | 401 on /ingest/otlp | Token mismatch — rotate token in Settings → Collectors and re-Sync |
 | Sync fails | Check SSH credentials in Settings → Collectors → SSH tab; verify the key has access to the collector host |
 | Port 162 bind fails | Verify `AmbientCapabilities=CAP_NET_BIND_SERVICE` in pktsnmp.service; `sudo systemctl daemon-reload && sudo systemctl restart pktsnmp` |

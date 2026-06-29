@@ -338,8 +338,14 @@ Default admin is created by the install script. Password is changed via Settings
 
 Configure in **Settings → Auth**:
 1. Set the Okta Entity ID, SSO URL, and paste the IdP certificate
-2. In Okta, create a SAML app pointing to `http://SERVER-IP:8767/auth/saml/acs`
-3. Map the `role` attribute from Okta claims to `admin` / `analyst` / `viewer`
+2. In Okta, create a SAML app with:
+   - **Single sign-on URL (ACS):** `https://YOUR-FQDN:8767/api/auth/saml/callback`
+   - **Audience URI (SP Entity ID):** `https://YOUR-FQDN:8767/api/auth/saml/metadata`
+   - **Name ID format:** EmailAddress
+3. Add a SAML attribute statement: Name = `role`, Value = `user.appuser.role` (or group-based EL expression)
+4. Set each user's app-level role to `admin`, `analyst`, or `viewer` in Okta Assignments
+
+> **Note:** The ACS URL must use the same hostname as the TLS certificate (`base_url` in Settings → General). HTTP is not supported for SAML.
 
 ---
 
@@ -572,4 +578,4 @@ To add a new migration: create `migrations/NNN_your_change.sql` and restart the 
 | pktFlow | 8760 | NetFlow ingest and visualization (pktSNMP ancestor) |
 | pktDashboard | 8760 | Suite home / logo hosting |
 
-Logos for all pkt apps are served from `http://172.23.80.5:8760/logos/`.
+Logos for all pkt apps are served from `http://SERVER-IP:8760/logos/`.
