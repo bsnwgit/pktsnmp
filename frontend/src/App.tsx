@@ -11,6 +11,7 @@ const Settings    = lazy(() => import('./pages/Settings'))
 const Collectors  = lazy(() => import('./pages/Collectors'))
 const OidCatalog  = lazy(() => import('./pages/OidCatalog'))
 const Devices     = lazy(() => import('./pages/Devices'))
+const MetricsPage = lazy(() => import('./pages/MetricsPage'))
 
 function PageFallback() {
   return <div className="flex items-center justify-center h-48 text-white">Loading…</div>
@@ -63,6 +64,11 @@ export default function App() {
           <Route path="/devices" element={
             <ProtectedRoute>
               <Suspense fallback={<PageFallback />}><Devices /></Suspense>
+            </ProtectedRoute>
+          } />
+          <Route path="/metrics" element={
+            <ProtectedRoute>
+              <Suspense fallback={<PageFallback />}><MetricsPage /></Suspense>
             </ProtectedRoute>
           } />
           <Route path="/users" element={<Navigate to="/settings" replace />} />
