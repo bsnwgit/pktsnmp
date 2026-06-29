@@ -1,5 +1,5 @@
 import { Component, useEffect, useRef, useState } from 'react'
-import { api, getToken, User, UserIn, SslStatus } from '../api/client'
+import { api, getToken, User, UserIn, SslStatus, HierarchyOrg, HierarchyGroup, HierarchySite } from '../api/client'
 import { useAutoRefresh } from '../store/autoRefresh'
 import { useAuth } from '../store/auth'
 
@@ -370,7 +370,7 @@ function parseIdpMetadata(xml: string): {
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
-type TabId = 'general' | 'snmp' | 'credentials' | 'storage' | 'backup' | 'auth' | 'notifications' | 'integrations' | 'users'
+type TabId = 'general' | 'snmp' | 'credentials' | 'storage' | 'backup' | 'auth' | 'notifications' | 'integrations' | 'users' | 'hierarchy'
 
 const TABS: Array<{ id: TabId; label: string; adminOnly?: boolean }> = [
   { id: 'general',       label: 'General' },
@@ -381,6 +381,7 @@ const TABS: Array<{ id: TabId; label: string; adminOnly?: boolean }> = [
   { id: 'auth',          label: 'Auth' },
   { id: 'notifications', label: 'Notifications' },
   { id: 'integrations',  label: 'Integrations' },
+  { id: 'hierarchy',     label: 'Hierarchy', adminOnly: true },
   { id: 'users',         label: 'Users', adminOnly: true },
 ]
 
@@ -996,6 +997,9 @@ export default function Settings() {
           )}
         </Section>
       )}
+
+      {/* Hierarchy tab — admin only */}
+      {tab === 'hierarchy' && isAdmin && <TabErrorBoundary><HierarchyTab /></TabErrorBoundary>}
 
       {/* Users tab — admin only */}
       {tab === 'users' && isAdmin && <UsersTab />}
@@ -1816,6 +1820,271 @@ function UsersTab() {
         </div>
       )}
       {resetPw && <ResetPasswordModal user={resetPw} onClose={() => setResetPw(null)} />}
+    </div>
+  )
+}
+
+// ── Hierarchy tab ─────────────────────────────────────────────────────────────
+
+function HierarchyTab() {
+  const [orgs, setOrgs]     = useState<HierarchyOrg[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError]   = useState('')
+
+  // Add-form state
+  const [newOrg, setNewOrg]           = useState('')
+  const [newGroup, setNewGroup]       = useState<Record<number, string>>({})   // orgId → name
+  const [newSite, setNewSite]         = useState<Record<number, string>>({})   // groupId → name
+  const [addingOrg, setAddingOrg]     = useState(false)
+  const [addingGroup, setAddingGroup] = useState<Record<number, boolean>>({})
+  const [addingSite, setAddingSite]   = useState<Record<number, boolean>>({})
+
+  // Expand/collapse
+  const [expandedOrgs, setExpandedOrgs]     = useState<Set<number>>(new Set())
+  const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set())
+
+  const load = async () => {
+    setLoading(true)
+    try { setOrgs(await api.getHierarchy()) }
+    catch (e: any) { setError(e.message || 'Failed to load hierarchy') }
+    finally { setLoading(false) }
+  }
+  useEffect(() => { void load() }, [])
+
+  const toggleOrg   = (id: number) => setExpandedOrgs(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleGroup = (id: number) => setExpandedGroups(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+
+  const addOrg = async () => {
+    const name = newOrg.trim()
+    if (!name) return
+    setAddingOrg(true)
+    try {
+      await api.createHierarchyOrg(name)
+      setNewOrg('')
+      const updated = await api.getHierarchy()
+      setOrgs(updated)
+      const newEntry = updated.find(o => o.name === name)
+      if (newEntry) setExpandedOrgs(s => new Set([...s, newEntry.id]))
+    } catch (e: any) { setError(e.message || 'Failed') }
+    finally { setAddingOrg(false) }
+  }
+
+  const deleteOrg = async (id: number, name: string) => {
+    if (!window.confirm(`Delete org "${name}" and all its groups and sites?`)) return
+    try { await api.deleteHierarchyOrg(id); setOrgs(await api.getHierarchy()) }
+    catch (e: any) { setError(e.message || 'Failed') }
+  }
+
+  const addGroup = async (orgId: number) => {
+    const name = (newGroup[orgId] ?? '').trim()
+    if (!name) return
+    setAddingGroup(s => ({ ...s, [orgId]: true }))
+    try {
+      const grp = await api.createHierarchyGroup(name, orgId)
+      setNewGroup(s => ({ ...s, [orgId]: '' }))
+      const updated = await api.getHierarchy()
+      setOrgs(updated)
+      setExpandedOrgs(s => new Set([...s, orgId]))
+      setExpandedGroups(s => new Set([...s, grp.id]))
+    } catch (e: any) { setError(e.message || 'Failed') }
+    finally { setAddingGroup(s => ({ ...s, [orgId]: false })) }
+  }
+
+  const deleteGroup = async (id: number, name: string) => {
+    if (!window.confirm(`Delete group "${name}" and all its sites?`)) return
+    try { await api.deleteHierarchyGroup(id); setOrgs(await api.getHierarchy()) }
+    catch (e: any) { setError(e.message || 'Failed') }
+  }
+
+  const addSite = async (groupId: number) => {
+    const name = (newSite[groupId] ?? '').trim()
+    if (!name) return
+    setAddingSite(s => ({ ...s, [groupId]: true }))
+    try {
+      await api.createHierarchySite(name, groupId)
+      setNewSite(s => ({ ...s, [groupId]: '' }))
+      setOrgs(await api.getHierarchy())
+    } catch (e: any) { setError(e.message || 'Failed') }
+    finally { setAddingSite(s => ({ ...s, [groupId]: false })) }
+  }
+
+  const deleteSite = async (id: number, name: string) => {
+    if (!window.confirm(`Delete site "${name}"?`)) return
+    try { await api.deleteHierarchySite(id); setOrgs(await api.getHierarchy()) }
+    catch (e: any) { setError(e.message || 'Failed') }
+  }
+
+  if (loading) return <div className="flex items-center justify-center h-32 text-white text-sm">Loading hierarchy…</div>
+
+  return (
+    <div className="space-y-4">
+      {error && (
+        <div className="bg-red-900/20 border border-red-700/50 rounded-xl px-4 py-3 flex items-center justify-between">
+          <p className="text-sm text-red-400">{error}</p>
+          <button onClick={() => setError('')} className="text-red-500 hover:text-red-300 text-lg leading-none">✕</button>
+        </div>
+      )}
+
+      {/* Description card */}
+      <div className="bg-gray-900 border border-gray-800 rounded-xl px-6 py-4">
+        <h2 className="text-sm font-semibold text-white mb-1">Org / Group / Site Hierarchy</h2>
+        <p className="text-xs text-gray-400">
+          Define the organization tree that appears as dropdowns in device configuration.
+          Structure: <span className="text-white font-medium">Org → Group → Site</span>.
+          Deleting an entry cascades — removing an Org deletes all its Groups and Sites.
+        </p>
+      </div>
+
+      {/* Add org row */}
+      <div className="bg-gray-900 border border-gray-800 rounded-xl px-6 py-4">
+        <p className="text-xs font-semibold text-white uppercase tracking-wider mb-3">Add Organization</p>
+        <div className="flex items-center gap-2">
+          <input
+            value={newOrg}
+            onChange={e => setNewOrg(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && addOrg()}
+            placeholder="New org name…"
+            className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <button
+            onClick={addOrg}
+            disabled={addingOrg || !newOrg.trim()}
+            className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white rounded-lg transition-colors whitespace-nowrap"
+          >
+            {addingOrg ? 'Adding…' : '+ Add Org'}
+          </button>
+        </div>
+      </div>
+
+      {/* Org tree */}
+      {orgs.length === 0 ? (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl px-6 py-8 text-center">
+          <p className="text-sm text-gray-500">No organizations defined yet. Add one above.</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {orgs.map(org => (
+            <div key={org.id} className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+              {/* Org row */}
+              <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-800">
+                <button onClick={() => toggleOrg(org.id)} className="text-gray-400 hover:text-white transition-colors w-4 flex-shrink-0 text-xs">
+                  {expandedOrgs.has(org.id) ? '▼' : '▶'}
+                </button>
+                <svg className="w-4 h-4 text-blue-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                </svg>
+                <span className="text-sm font-medium text-white flex-1">{org.name}</span>
+                <span className="text-xs text-gray-500">{org.groups.length} group{org.groups.length !== 1 ? 's' : ''}</span>
+                <button
+                  onClick={() => deleteOrg(org.id, org.name)}
+                  className="text-xs text-red-500 hover:text-red-400 px-2 py-1 rounded transition-colors ml-1"
+                  title="Delete org"
+                >
+                  Delete
+                </button>
+              </div>
+
+              {expandedOrgs.has(org.id) && (
+                <div className="px-4 py-3 space-y-3">
+                  {/* Add group row */}
+                  <div className="flex items-center gap-2 pl-6">
+                    <input
+                      value={newGroup[org.id] ?? ''}
+                      onChange={e => setNewGroup(s => ({ ...s, [org.id]: e.target.value }))}
+                      onKeyDown={e => e.key === 'Enter' && addGroup(org.id)}
+                      placeholder="New group name…"
+                      className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                    <button
+                      onClick={() => addGroup(org.id)}
+                      disabled={addingGroup[org.id] || !(newGroup[org.id] ?? '').trim()}
+                      className="px-3 py-1.5 text-xs bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-white rounded-lg transition-colors whitespace-nowrap"
+                    >
+                      {addingGroup[org.id] ? 'Adding…' : '+ Group'}
+                    </button>
+                  </div>
+
+                  {/* Group list */}
+                  {org.groups.length === 0 ? (
+                    <p className="text-xs text-gray-600 pl-6">No groups yet.</p>
+                  ) : (
+                    <div className="space-y-2 pl-4">
+                      {org.groups.map(grp => (
+                        <div key={grp.id} className="bg-gray-800/50 border border-gray-700/50 rounded-lg overflow-hidden">
+                          {/* Group row */}
+                          <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-700/50">
+                            <button onClick={() => toggleGroup(grp.id)} className="text-gray-500 hover:text-white transition-colors w-3 flex-shrink-0 text-xs">
+                              {expandedGroups.has(grp.id) ? '▼' : '▶'}
+                            </button>
+                            <svg className="w-3.5 h-3.5 text-green-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                            </svg>
+                            <span className="text-sm text-white flex-1">{grp.name}</span>
+                            <span className="text-xs text-gray-500">{grp.sites.length} site{grp.sites.length !== 1 ? 's' : ''}</span>
+                            <button
+                              onClick={() => deleteGroup(grp.id, grp.name)}
+                              className="text-xs text-red-500 hover:text-red-400 px-2 py-0.5 rounded transition-colors ml-1"
+                              title="Delete group"
+                            >
+                              Delete
+                            </button>
+                          </div>
+
+                          {expandedGroups.has(grp.id) && (
+                            <div className="px-3 py-2.5 space-y-2">
+                              {/* Add site row */}
+                              <div className="flex items-center gap-2 pl-5">
+                                <input
+                                  value={newSite[grp.id] ?? ''}
+                                  onChange={e => setNewSite(s => ({ ...s, [grp.id]: e.target.value }))}
+                                  onKeyDown={e => e.key === 'Enter' && addSite(grp.id)}
+                                  placeholder="New site name…"
+                                  className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1 text-xs text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                />
+                                <button
+                                  onClick={() => addSite(grp.id)}
+                                  disabled={addingSite[grp.id] || !(newSite[grp.id] ?? '').trim()}
+                                  className="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-white rounded-lg transition-colors whitespace-nowrap"
+                                >
+                                  {addingSite[grp.id] ? 'Adding…' : '+ Site'}
+                                </button>
+                              </div>
+
+                              {/* Site list */}
+                              {grp.sites.length === 0 ? (
+                                <p className="text-xs text-gray-600 pl-5">No sites yet.</p>
+                              ) : (
+                                <div className="space-y-1 pl-5">
+                                  {grp.sites.map((site: HierarchySite) => (
+                                    <div key={site.id} className="flex items-center gap-2 py-1">
+                                      <svg className="w-3 h-3 text-amber-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
+                                      </svg>
+                                      <span className="text-xs text-gray-300 flex-1">{site.name}</span>
+                                      <button
+                                        onClick={() => deleteSite(site.id, site.name)}
+                                        className="text-xs text-red-500 hover:text-red-400 px-1.5 py-0.5 rounded transition-colors"
+                                        title="Delete site"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
