@@ -11,7 +11,7 @@ import time
 from typing import Annotated, Any, Optional
 
 import aiosqlite
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Security, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Security, UploadFile, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
@@ -73,10 +73,13 @@ def _mask_device(device: dict) -> dict:
     return d
 
 
+_CRED_SECRET_FIELDS = {"auth_key_enc", "priv_key_enc", "community"}
+
+
 def _mask_credential(cred: dict) -> dict:
     d = dict(cred)
-    for field in _V3_SECRET_FIELDS:
-        if d.get(field):
+    for field in _CRED_SECRET_FIELDS:
+        if d.get(field) is not None:
             d[field] = _MASK
     return d
 
@@ -126,23 +129,35 @@ class CollectorUpdate(BaseModel):
 class DeviceCreate(BaseModel):
     name: str
     ip: str
-    site: str = ""
+    org: str = ""          # Org (top level)
+    groups: str = ""       # Group (second level; 'group' is a SQL keyword so column is 'groups')
+    site: str = ""         # Site (third level; was 'location' before migration 011)
+    device_type: str = ""  # firewall|switch|wap|wlc|router|iot|ups|server|storage|pdu|camera|load_balancer|vpn|printer|other|''
     collector_id: int = 1
     credential_id: int | None = None
     poll_interval_override: int | None = None
     otelcol_label: str | None = None
     enabled: bool = True
+    parent_device_id: int | None = None
+    ha_role: str | None = None   # 'active' | 'passive' | 'standalone' | None
+    ha_peer_id: int | None = None  # ID of the HA partner device
 
 
 class DeviceUpdate(BaseModel):
     name: str | None = None
     ip: str | None = None
+    org: str | None = None
+    groups: str | None = None
     site: str | None = None
+    device_type: str | None = None
     collector_id: int | None = None
     credential_id: int | None = None
     poll_interval_override: int | None = None
     otelcol_label: str | None = None
     enabled: bool | None = None
+    parent_device_id: int | None = None
+    ha_role: str | None = None   # 'active' | 'passive' | 'standalone' | None
+    ha_peer_id: int | None = None  # ID of the HA partner device
 
 
 class OidCatalogCreate(BaseModel):
@@ -254,6 +269,9 @@ async def update_credential(cred_id: int, body: CredentialUpdate, _: AdminUser, 
         val = updates.pop("priv_key")
         if val and val != _MASK:
             d["priv_key_enc"] = _encrypt(val)
+    # community is masked in GET responses — only update if a real value was sent
+    if "community" in updates and updates["community"] == _MASK:
+        updates.pop("community")
     d.update(updates)
     await db.execute(
         """UPDATE snmp_credentials SET name=?, description=?, snmp_version=?, community=?,
@@ -375,13 +393,14 @@ async def rotate_collector_token(collector_id: int, _: AdminUser, db: aiosqlite.
 # =============================================================================
 
 _DEVICE_SELECT = """
-    SELECT d.id, d.name, d.ip, d.site, d.collector_id, d.credential_id,
+    SELECT d.id, d.name, d.ip, d.org, d.groups, d.site, d.device_type,
+           d.collector_id, d.credential_id,
            d.poll_interval_override, d.last_seen, d.status, d.last_error,
            d.otelcol_label, d.enabled, d.created_at, d.updated_at,
+           d.parent_device_id, d.ha_role, d.ha_peer_id,
            col.name AS collector_name,
            cred.name AS credential_name,
            cred.snmp_version AS cred_snmp_version,
-           cred.community AS cred_community,
            cred.security_level AS cred_security_level
     FROM devices d
     LEFT JOIN collectors col ON col.id = d.collector_id
@@ -403,7 +422,7 @@ async def list_devices(
     if collector_id is not None:
         conditions.append("d.collector_id=?"); params.append(collector_id)
     if site:
-        conditions.append("d.site=?"); params.append(site)
+        conditions.append("d.groups=?"); params.append(site)
     if enabled is not None:
         conditions.append("d.enabled=?"); params.append(1 if enabled else 0)
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
@@ -411,6 +430,265 @@ async def list_devices(
     async with db.execute(sql, params) as cur:
         rows = await cur.fetchall()
     return [dict(r) for r in rows]
+
+
+@router.get("/devices/tree")
+async def device_tree(_: CurrentUser, db: aiosqlite.Connection = Depends(get_db)) -> list[dict]:
+    """Return the full environment tree: Org → Group → Site → Root Devices → Child Devices.
+
+    DB columns: org (Org), site (Group in UI), location (Site in UI).
+    Virtual grouping node types: 'org', 'group', 'site'.
+    Device nodes: type='device'. Passive HA devices hidden; children redirect to active peer.
+    """
+    from collections import defaultdict
+    db.row_factory = aiosqlite.Row
+
+    # Fetch ALL devices (passive too) to build peer map
+    async with db.execute(
+        """SELECT id, name, ip, org, groups, site, status, enabled,
+                  parent_device_id, ha_role, ha_peer_id, last_seen
+           FROM devices ORDER BY name"""
+    ) as cur:
+        device_rows = await cur.fetchall()
+
+    # peer_map: passive_id → active_id
+    peer_map: dict[int, int] = {}
+    for r in device_rows:
+        if r["ha_role"] not in (None, "active", "standalone") and r["ha_peer_id"]:
+            peer_map[r["id"]] = r["ha_peer_id"]
+
+    # Display-worthy: non-passive devices only
+    display_ids = {r["id"] for r in device_rows
+                   if r["ha_role"] is None or r["ha_role"] in ("active", "standalone")}
+
+    # Build flat node map
+    nodes: dict[int, dict] = {}
+    for r in device_rows:
+        if r["id"] not in display_ids:
+            continue
+        is_down = (r["status"] == "down") and bool(r["enabled"])
+        nodes[r["id"]] = {
+            "type": "device",
+            "id": r["id"],
+            "name": r["name"],
+            "ip": r["ip"],
+            "org": r["org"] or "",
+            "groups": r["groups"] or "",      # "Group" in UI
+            "site": r["site"] or "",          # "Site" in UI
+            "device_type": r["device_type"] or "",
+            "status": r["status"] or "unknown",
+            "enabled": bool(r["enabled"]),
+            "parent_device_id": r["parent_device_id"],
+            "ha_role": r["ha_role"],
+            "ha_peer_id": r["ha_peer_id"],
+            "last_seen": r["last_seen"],
+            "direct_alerts": 1 if is_down else 0,
+            "subtree_alerts": 1 if is_down else 0,
+            "children": [],
+        }
+
+    # Wire device parent → child; passive parents redirect to active peer
+    device_roots: list[dict] = []
+    for node in nodes.values():
+        pid = node["parent_device_id"]
+        if pid in peer_map:
+            pid = peer_map[pid]
+        if pid and pid in nodes:
+            nodes[pid]["children"].append(node)
+        else:
+            device_roots.append(node)
+
+    # Post-order DFS: propagate subtree_alerts up through device trees
+    def _propagate(node: dict) -> int:
+        total = node["direct_alerts"]
+        for child in node["children"]:
+            total += _propagate(child)
+        node["subtree_alerts"] = total
+        return total
+
+    for root in device_roots:
+        _propagate(root)
+
+    # Group root devices: org → groups (Group) → site (Site)
+    tree: dict[str, dict[str, dict[str, list[dict]]]] = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+    for dev in device_roots:
+        org  = dev["org"] or "(Unassigned)"
+        grp  = dev["groups"] or "(Unassigned)"
+        site = dev["site"] or "(Unassigned)"
+        tree[org][grp][site].append(dev)
+
+    result: list[dict] = []
+    for org_name in sorted(tree):
+        org_alerts = 0
+        org_children: list[dict] = []
+        for grp_name in sorted(tree[org_name]):
+            grp_alerts = 0
+            grp_children: list[dict] = []
+            for site_name in sorted(tree[org_name][grp_name]):
+                devs = tree[org_name][grp_name][site_name]
+                site_alerts = sum(d["subtree_alerts"] for d in devs)
+                grp_children.append({
+                    "type": "site",
+                    "name": site_name,
+                    "direct_alerts": 0,
+                    "subtree_alerts": site_alerts,
+                    "children": devs,
+                })
+                grp_alerts += site_alerts
+            org_children.append({
+                "type": "group",
+                "name": grp_name,
+                "direct_alerts": 0,
+                "subtree_alerts": grp_alerts,
+                "children": grp_children,
+            })
+            org_alerts += grp_alerts
+        result.append({
+            "type": "org",
+            "name": org_name,
+            "direct_alerts": 0,
+            "subtree_alerts": org_alerts,
+            "children": org_children,
+        })
+
+    return result
+
+
+@router.get("/devices/export")
+async def export_devices(_: CurrentUser, db: aiosqlite.Connection = Depends(get_db)):
+    """Export all devices as a CSV file download."""
+    import csv
+    import io
+    from fastapi.responses import StreamingResponse
+
+    db.row_factory = aiosqlite.Row
+    async with db.execute(
+        """SELECT d.name, d.ip, d.org, d.groups, d.site, d.device_type,
+                  d.otelcol_label, d.enabled, d.poll_interval_override, d.ha_role,
+                  col.name AS collector_name,
+                  cred.name AS credential_name
+           FROM devices d
+           LEFT JOIN collectors col ON col.id = d.collector_id
+           LEFT JOIN snmp_credentials cred ON cred.id = d.credential_id
+           ORDER BY d.name"""
+    ) as cur:
+        rows = await cur.fetchall()
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        "name", "ip", "org", "groups", "site", "device_type",
+        "otelcol_label", "enabled", "poll_interval_override",
+        "ha_role", "collector_name", "credential_name",
+    ])
+    for r in rows:
+        writer.writerow([
+            r["name"], r["ip"],
+            r["org"] or "", r["groups"] or "", r["site"] or "", r["device_type"] or "",
+            r["otelcol_label"] or "",
+            "true" if r["enabled"] else "false",
+            r["poll_interval_override"] if r["poll_interval_override"] is not None else "",
+            r["ha_role"] or "",
+            r["collector_name"] or "", r["credential_name"] or "",
+        ])
+    buf.seek(0)
+    return StreamingResponse(
+        io.BytesIO(buf.getvalue().encode("utf-8")),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="pktsnmp-devices.csv"'},
+    )
+
+
+@router.post("/devices/import-csv")
+async def import_devices_csv(
+    file: UploadFile,
+    _: AdminUser,
+    db: aiosqlite.Connection = Depends(get_db),
+) -> dict:
+    """Import devices from a multipart CSV upload.
+
+    CSV columns (header row required):
+      name, ip, org, groups, site, device_type, otelcol_label, enabled,
+      poll_interval_override, ha_role, collector_name, credential_name
+
+    - Rows are inserted; duplicate IPs are skipped (not updated).
+    - collector_name and credential_name are matched by name (case-sensitive).
+      Unknown collector_name defaults to the built-in local collector (id=1).
+      Unknown credential_name leaves credential_id as NULL.
+    """
+    import csv, io
+
+    raw = await file.read()
+    text = raw.decode("utf-8-sig")  # strip BOM (Excel exports)
+
+    db.row_factory = aiosqlite.Row
+    async with db.execute("SELECT id, name FROM collectors") as cur:
+        col_map = {r["name"]: r["id"] for r in await cur.fetchall()}
+    async with db.execute("SELECT id, name FROM snmp_credentials") as cur:
+        cred_map = {r["name"]: r["id"] for r in await cur.fetchall()}
+
+    reader = csv.DictReader(io.StringIO(text))
+    created = 0
+    skipped = 0
+    errors: list[str] = []
+
+    for lineno, row in enumerate(reader, start=2):
+        name = (row.get("name") or "").strip()
+        ip   = (row.get("ip") or "").strip()
+        if not name or not ip:
+            errors.append(f"Row {lineno}: missing name or ip — skipped")
+            skipped += 1
+            continue
+
+        col_name  = (row.get("collector_name") or "").strip()
+        cred_name = (row.get("credential_name") or "").strip()
+        collector_id  = col_map.get(col_name, 1)
+        credential_id = cred_map.get(cred_name)
+
+        enabled_str = (row.get("enabled") or "true").strip().lower()
+        enabled = enabled_str not in ("false", "0", "no")
+
+        poll_str = (row.get("poll_interval_override") or "").strip()
+        poll_override = int(poll_str) if poll_str.lstrip("-").isdigit() else None
+
+        ha_role = (row.get("ha_role") or "").strip() or None
+        if ha_role not in (None, "active", "passive", "standalone"):
+            ha_role = None
+
+        try:
+            async with db.execute(
+                """INSERT OR IGNORE INTO devices
+                    (name, ip, org, groups, site, device_type, otelcol_label,
+                     enabled, poll_interval_override, ha_role,
+                     collector_id, credential_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id""",
+                (
+                    name, ip,
+                    (row.get("org") or "").strip(),
+                    (row.get("groups") or "").strip(),
+                    (row.get("site") or "").strip(),
+                    (row.get("device_type") or "").strip(),
+                    (row.get("otelcol_label") or "").strip() or None,
+                    1 if enabled else 0,
+                    poll_override,
+                    ha_role,
+                    collector_id,
+                    credential_id,
+                ),
+            ) as cur:
+                result_row = await cur.fetchone()
+            if result_row:
+                created += 1
+            else:
+                skipped += 1
+                errors.append(f"Row {lineno}: {name} ({ip}) already exists — skipped")
+        except Exception as exc:
+            errors.append(f"Row {lineno}: {name} ({ip}): {exc}")
+            skipped += 1
+
+    await db.commit()
+    _signal_reload()
+    return {"created": created, "skipped": skipped, "errors": errors}
 
 
 @router.get("/devices/{device_id}")
@@ -429,21 +707,29 @@ async def create_device(body: DeviceCreate, _: AdminUser, db: aiosqlite.Connecti
     try:
         async with db.execute(
             """INSERT INTO devices
-                (name, ip, site, collector_id, credential_id,
-                 poll_interval_override, otelcol_label, enabled)
-               VALUES (?,?,?,?,?,?,?,?) RETURNING id""",
-            (body.name, body.ip, body.site, body.collector_id, body.credential_id,
+                (name, ip, org, groups, site, device_type, collector_id, credential_id,
+                 poll_interval_override, otelcol_label, enabled, parent_device_id, ha_role, ha_peer_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id""",
+            (body.name, body.ip, body.org, body.groups, body.site, body.device_type,
+             body.collector_id, body.credential_id,
              body.poll_interval_override, body.otelcol_label,
-             1 if body.enabled else 0),
+             1 if body.enabled else 0, body.parent_device_id, body.ha_role, body.ha_peer_id),
         ) as cur:
             row = await cur.fetchone()
+        new_id = row[0]
         await db.commit()
     except Exception as e:
         if "UNIQUE" in str(e):
             raise HTTPException(status_code=409, detail="Device IP already registered")
         raise
+    # Bidirectional HA peer link
+    if body.ha_peer_id:
+        await db.execute(
+            "UPDATE devices SET ha_peer_id=? WHERE id=?", (new_id, body.ha_peer_id)
+        )
+        await db.commit()
     _signal_reload()
-    return {"id": row[0], "name": body.name, "ip": body.ip}
+    return {"id": new_id, "name": body.name, "ip": body.ip}
 
 
 @router.put("/devices/{device_id}")
@@ -454,14 +740,26 @@ async def update_device(device_id: int, body: DeviceUpdate, _: AdminUser, db: ai
     if not row:
         raise HTTPException(status_code=404, detail="Device not found")
     d = dict(row)
-    d.update(body.model_dump(exclude_none=True))
+    # Handle parent_device_id explicitly — it can be set to None intentionally
+    updates = body.model_dump(exclude_unset=True)
+    d.update(updates)
+    new_peer_id = d.get("ha_peer_id")
     await db.execute(
-        """UPDATE devices SET name=?, ip=?, site=?, collector_id=?, credential_id=?,
-            poll_interval_override=?, otelcol_label=?, enabled=?,
+        """UPDATE devices SET name=?, ip=?, org=?, groups=?, site=?, device_type=?,
+            collector_id=?, credential_id=?,
+            poll_interval_override=?, otelcol_label=?, enabled=?, parent_device_id=?, ha_role=?, ha_peer_id=?,
             updated_at=datetime('now') WHERE id=?""",
-        (d.get("name"), d.get("ip"), d.get("site"), d.get("collector_id"), d.get("credential_id"),
-         d.get("poll_interval_override"), d.get("otelcol_label"), d.get("enabled"), device_id),
+        (d.get("name"), d.get("ip"), d.get("org", ""), d.get("groups", ""), d.get("site", ""),
+         d.get("device_type", ""), d.get("collector_id"), d.get("credential_id"),
+         d.get("poll_interval_override"), d.get("otelcol_label"), d.get("enabled"),
+         d.get("parent_device_id"), d.get("ha_role"), new_peer_id, device_id),
     )
+    # Bidirectional HA peer link: keep the partner in sync
+    if new_peer_id:
+        await db.execute(
+            "UPDATE devices SET ha_peer_id=? WHERE id=? AND (ha_peer_id IS NULL OR ha_peer_id=?)",
+            (device_id, new_peer_id, device_id),
+        )
     await db.commit()
     _signal_reload()
     return {"id": device_id, "updated": True}
