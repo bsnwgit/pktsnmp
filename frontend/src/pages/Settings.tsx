@@ -1017,7 +1017,7 @@ export default function Settings() {
             <p className="text-xs font-semibold text-white uppercase tracking-wider">SSL / TLS</p>
           </div>
           <div className="py-3">
-            <SslPanel />
+            <SslPanel sslEnabled={bool('ssl_enabled')} onToggleSSL={v => { set('ssl_enabled', v); api.bulkUpdateSettings({ ssl_enabled: v }).catch(() => {}) }} />
           </div>
         </Section>
       )}
@@ -1067,7 +1067,7 @@ function SslDropZone({ label, accept, file, onFile, dragging, onDrag }: {
   )
 }
 
-function SslPanel() {
+function SslPanel({ sslEnabled, onToggleSSL }: { sslEnabled: boolean; onToggleSSL: (v: boolean) => void }) {
   const [status, setStatus]       = useState<SslStatus | null>(null)
   const [mode, setMode]           = useState<'pem' | 'pfx'>('pfx')
   const [certFile, setCertFile]   = useState<File | null>(null)
@@ -1128,6 +1128,20 @@ function SslPanel() {
 
   return (
     <div className="space-y-4">
+      {/* Enable HTTPS toggle — always visible */}
+      <div className="flex items-center justify-between bg-gray-800 border border-gray-700 rounded-xl px-4 py-3">
+        <div>
+          <p className="text-sm font-medium text-white">Enable HTTPS</p>
+          <p className="text-xs text-gray-400">Requires a certificate · restart service to apply</p>
+        </div>
+        <button
+          onClick={() => onToggleSSL(!sslEnabled)}
+          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${sslEnabled ? 'bg-blue-600' : 'bg-gray-600'}`}
+        >
+          <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${sslEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+        </button>
+      </div>
+
       {status?.installed ? (
         <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-2">
           <div className="flex items-center justify-between">
