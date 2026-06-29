@@ -135,7 +135,7 @@ export default function OidCatalog() {
     : oids
 
   return (
-    <div className="max-w-5xl mx-auto space-y-4">
+    <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <h1 className="text-lg font-semibold text-white">OID Catalog</h1>

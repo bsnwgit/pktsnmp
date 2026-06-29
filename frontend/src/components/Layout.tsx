@@ -72,12 +72,13 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
 
 const NAV = [
   { to: '/',            label: 'Dashboard',  icon: '◑', adminOnly: false },
+  { to: '/metrics',     label: 'Metrics',    icon: '∿', adminOnly: false },
+  { to: '/alerts',      label: 'Alerts',     icon: '△', adminOnly: false },
+  { to: '/logs',        label: 'Logs',       icon: '▤', adminOnly: false },
   { to: '/collectors',  label: 'Collectors', icon: '⇅', adminOnly: false },
   { to: '/devices',     label: 'Devices',    icon: '⬡', adminOnly: false },
   { to: '/oid-catalog', label: 'OID Catalog', icon: '≡', adminOnly: false },
-  { to: '/alerts',      label: 'Alerts',     icon: '△', adminOnly: false },
-  { to: '/logs',        label: 'Logs',       icon: '▤', adminOnly: false },
-  { to: '/settings',    label: 'Settings',   icon: '⚙', adminOnly: false },
+  { to: '/settings',    label: 'Settings',   icon: '⚙', adminOnly: true },
 ]
 
 const INTERVALS = [
@@ -127,13 +128,15 @@ export default function Layout({ children }: { children: ReactNode }) {
   const [unacked, setUnacked] = useState<number>(0)
   const [showChangePw, setShowChangePw] = useState(false)
 
-  // Poll for unacked alert count every 30s
+  // Poll for unresolved+unacked alert count every 30s
   useEffect(() => {
     const tick = async () => {
       try {
-        // TODO: wire to real alert events endpoint once alerts are implemented
-        setUnacked(0)
-      } catch {}
+        const events = await api.getAlertEvents({ active: true, acked: false, limit: 500 })
+        setUnacked(events.length)
+      } catch {
+        // silently ignore — badge just won't show if API is down
+      }
     }
     tick()
     const id = setInterval(tick, 30_000)

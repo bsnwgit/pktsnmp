@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { getToken } from '../api/client'
+import { useSearchParams } from 'react-router-dom'
+import { getToken, OID_META } from '../api/client'
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 
@@ -58,16 +59,31 @@ const CHANNELS_AVAILABLE = ['inapp', 'slack', 'email', 'pagerduty', 'webhook']
 
 const RULE_TYPES: Array<{ value: string; label: string; group: string; hint: string }> = [
   // Device
-  { value: 'device_down',        label: 'Device down',         group: 'Device',    hint: 'Fire when a polled device stops responding to SNMP' },
-  { value: 'poll_failure',       label: 'Poll failure spike',  group: 'Device',    hint: 'Fire when poll errors for a device exceed a threshold' },
-  { value: 'snmp_auth_failure',  label: 'Auth failure',        group: 'Device',    hint: 'Fire on repeated SNMP authentication failures from a device' },
+  { value: 'device_down',           label: 'Device down',              group: 'Device',    hint: 'Fire when a polled device stops responding to SNMP' },
+  { value: 'poll_failure',          label: 'Poll failure spike',        group: 'Device',    hint: 'Fire when poll errors for a device exceed a threshold' },
+  { value: 'snmp_auth_failure',     label: 'Auth failure',              group: 'Device',    hint: 'Fire on repeated SNMP authentication failures from a device' },
+  { value: 'device_unreachable',    label: 'Device poll gap',           group: 'Device',    hint: 'Fire when no SNMP data arrives for a device for N minutes' },
+  // Interface
+  { value: 'interface_down',        label: 'Interface down',            group: 'Interface', hint: 'Fire when ifOperStatus=0 for the entire eval window' },
+  { value: 'interface_flap',        label: 'Interface flapping',        group: 'Interface', hint: 'Fire when an interface status changes more than N times in a window' },
+  // Metric
+  { value: 'metric_threshold',      label: 'Metric threshold',          group: 'Metric',    hint: 'Fire when an OID value or computed rate crosses a fixed threshold' },
+  { value: 'metric_spike',          label: 'Metric spike',              group: 'Metric',    hint: 'Fire when a recent metric mean is N× above its baseline average' },
+  { value: 'error_rate',            label: 'Error rate',                group: 'Metric',    hint: 'Fire when ifInErrors or ifOutErrors rate exceeds a threshold' },
+  { value: 'discard_rate',          label: 'Discard rate',              group: 'Metric',    hint: 'Fire when ifInDiscards or ifOutDiscards rate exceeds a threshold' },
+  { value: 'high_error_ratio',      label: 'High error ratio',          group: 'Metric',    hint: 'Fire when errors/packets ratio exceeds a threshold %' },
+  { value: 'bandwidth_utilization', label: 'Bandwidth utilization',     group: 'Metric',    hint: 'Fire when interface utilization (rate/speed) exceeds a threshold %' },
+  { value: 'speed_change',          label: 'Interface speed change',    group: 'Metric',    hint: 'Fire when ifSpeed changes by more than N%' },
   // Trap
-  { value: 'unknown_trap_source', label: 'Unknown trap source', group: 'Trap',     hint: 'Fire when traps arrive from an unregistered device' },
-  { value: 'trap_rate_spike',    label: 'Trap rate spike',     group: 'Trap',      hint: 'Fire when trap volume from a source spikes above a threshold' },
-  { value: 'trap_oid_match',     label: 'Trap OID match',      group: 'Trap',      hint: 'Fire when a specific OID appears in a received trap' },
-  // Threshold
-  { value: 'oid_threshold',      label: 'OID value threshold', group: 'Threshold', hint: 'Fire when a polled OID value crosses a fixed threshold' },
-  { value: 'oid_missing',        label: 'OID missing',         group: 'Threshold', hint: 'Fire when an expected OID disappears from poll results' },
+  { value: 'unknown_trap_source',   label: 'Unknown trap source',       group: 'Trap',      hint: 'Fire when traps arrive from an unregistered device' },
+  { value: 'trap_rate_spike',       label: 'Trap rate spike',           group: 'Trap',      hint: 'Fire when trap volume from a source spikes above a threshold' },
+  { value: 'trap_oid_match',        label: 'Trap OID match',            group: 'Trap',      hint: 'Fire when a specific OID appears in a received trap' },
+  { value: 'trap_received',         label: 'Specific trap received',    group: 'Trap',      hint: 'Fire when a trap matching an OID prefix is received' },
+  // Collector
+  { value: 'collector_gap',         label: 'Collector data gap',        group: 'Collector', hint: 'Fire when no polls arrive from a collector for N minutes' },
+  // Threshold (legacy)
+  { value: 'oid_threshold',         label: 'OID value threshold',       group: 'Threshold', hint: 'Fire when a polled OID value crosses a fixed threshold' },
+  { value: 'oid_missing',           label: 'OID missing',               group: 'Threshold', hint: 'Fire when an expected OID disappears from poll results' },
 ]
 
 function ruleGroup(rule_type: string): string {
@@ -75,14 +91,26 @@ function ruleGroup(rule_type: string): string {
 }
 
 const RULE_DEFAULTS: Record<string, { name: string; description: string }> = {
-  device_down:         { name: 'Device unreachable',    description: 'Alert when a polled device stops responding to SNMP requests' },
-  poll_failure:        { name: 'Poll failure spike',    description: 'Alert when SNMP poll errors for a device exceed a threshold' },
-  snmp_auth_failure:   { name: 'SNMP auth failure',    description: 'Alert when a device repeatedly fails SNMP authentication' },
-  unknown_trap_source: { name: 'Unknown trap source',  description: 'Alert when trap traffic arrives from an unregistered device' },
-  trap_rate_spike:     { name: 'Trap rate spike',      description: 'Alert when trap volume from a source spikes above a threshold' },
-  trap_oid_match:      { name: 'Trap OID match',       description: 'Alert when a specific OID appears in a received trap' },
-  oid_threshold:       { name: 'OID value threshold',  description: 'Alert when a polled OID value crosses a fixed threshold' },
-  oid_missing:         { name: 'OID missing from poll', description: 'Alert when an expected OID disappears from poll results' },
+  device_down:           { name: 'Device unreachable',       description: 'Alert when a polled device stops responding to SNMP requests' },
+  poll_failure:          { name: 'Poll failure spike',        description: 'Alert when SNMP poll errors for a device exceed a threshold' },
+  snmp_auth_failure:     { name: 'SNMP auth failure',        description: 'Alert when a device repeatedly fails SNMP authentication' },
+  device_unreachable:    { name: 'Device poll gap',          description: 'Alert when no SNMP data arrives for a device within the silence window' },
+  interface_down:        { name: 'Interface down',           description: 'Alert when ifOperStatus is down for the entire evaluation window' },
+  interface_flap:        { name: 'Interface flapping',       description: 'Alert when an interface changes state more than N times in a window' },
+  metric_threshold:      { name: 'Metric threshold',         description: 'Alert when an OID value or computed rate crosses a threshold' },
+  metric_spike:          { name: 'Metric spike',             description: 'Alert when a recent metric mean is significantly above its baseline' },
+  error_rate:            { name: 'Error rate',               description: 'Alert when interface error rate exceeds a threshold' },
+  discard_rate:          { name: 'Discard rate',             description: 'Alert when interface discard rate exceeds a threshold' },
+  high_error_ratio:      { name: 'High error ratio',         description: 'Alert when errors as a percentage of packets exceeds a threshold' },
+  bandwidth_utilization: { name: 'Bandwidth utilization',    description: 'Alert when interface utilization exceeds a threshold percentage' },
+  speed_change:          { name: 'Interface speed change',   description: 'Alert when ifSpeed changes significantly' },
+  unknown_trap_source:   { name: 'Unknown trap source',      description: 'Alert when trap traffic arrives from an unregistered device' },
+  trap_rate_spike:       { name: 'Trap rate spike',          description: 'Alert when trap volume from a source spikes above a threshold' },
+  trap_oid_match:        { name: 'Trap OID match',           description: 'Alert when a specific OID appears in a received trap' },
+  trap_received:         { name: 'Specific trap received',   description: 'Alert when a trap matching an OID prefix is received' },
+  collector_gap:         { name: 'Collector data gap',       description: 'Alert when no polls arrive from a collector within the silence window' },
+  oid_threshold:         { name: 'OID value threshold',      description: 'Alert when a polled OID value crosses a fixed threshold' },
+  oid_missing:           { name: 'OID missing from poll',    description: 'Alert when an expected OID disappears from poll results' },
 }
 
 // ── Conditions builder ────────────────────────────────────────────────────────
@@ -241,6 +269,199 @@ function ConditionsBuilder({ ruleType, conds, onChange }: {
         </Field>
         <Field label="Device IP (optional)" hint="Leave blank to monitor across all devices">
           <TextInput value={String(g('device_ip', ''))} onChange={v => set('device_ip', v)} placeholder="e.g. 192.168.1.1" />
+        </Field>
+      </div>
+    )
+  }
+
+  // ── New SNMP metric rule types ────────────────────────────────────────────
+
+  const OID_OPTS = Object.entries(OID_META).map(([k, v]) => ({ value: k, label: v.label }))
+  const DIR_OPTS = [{ value: 'both', label: 'Both (in + out)' }, { value: 'in', label: 'In only' }, { value: 'out', label: 'Out only' }]
+  const OP_OPTS  = [{ value: '>', label: '> greater than' }, { value: '>=', label: '≥ at least' }, { value: '<', label: '< less than' }, { value: '<=', label: '≤ at most' }]
+
+  if (ruleType === 'device_unreachable') {
+    return (
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Field label="Silence threshold (minutes)" hint="Alert when no polls arrive for a device for this long">
+          <TextInput type="number" value={String(g('silence_minutes', 15))} onChange={v => set('silence_minutes', parseInt(v) || 15)} />
+        </Field>
+        <Field label="Device ID (optional)" hint="Leave blank to monitor all devices">
+          <TextInput type="number" value={String(g('device_id', ''))} onChange={v => set('device_id', v ? parseInt(v) : undefined)} placeholder="Device ID" />
+        </Field>
+      </div>
+    )
+  }
+
+  if (ruleType === 'interface_down') {
+    return (
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Field label="Device ID (optional)" hint="Leave blank to monitor all devices">
+          <TextInput type="number" value={String(g('device_id', ''))} onChange={v => set('device_id', v ? parseInt(v) : undefined)} placeholder="Device ID" />
+        </Field>
+      </div>
+    )
+  }
+
+  if (ruleType === 'interface_flap') {
+    return (
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Field label="Flap threshold (# of state changes)" hint="Alert when status changes this many times in the eval window">
+          <TextInput type="number" value={String(g('flap_threshold', 3))} onChange={v => set('flap_threshold', parseInt(v) || 3)} />
+        </Field>
+        <Field label="Device ID (optional)" hint="Leave blank to monitor all devices">
+          <TextInput type="number" value={String(g('device_id', ''))} onChange={v => set('device_id', v ? parseInt(v) : undefined)} placeholder="Device ID" />
+        </Field>
+      </div>
+    )
+  }
+
+  if (ruleType === 'metric_threshold') {
+    return (
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Field label="OID / Metric">
+          <SelectInput value={String(g('oid_label', 'ifInOctets'))} onChange={v => set('oid_label', v)} options={OID_OPTS} />
+        </Field>
+        <Field label="Operator">
+          <SelectInput value={String(g('operator', '>'))} onChange={v => set('operator', v)} options={OP_OPTS} />
+        </Field>
+        <Field label="Threshold value" hint="Raw value or rate (bytes/s if Use Rate is enabled)">
+          <TextInput type="number" value={String(g('threshold', 0))} onChange={v => set('threshold', parseFloat(v) || 0)} />
+        </Field>
+        <Field label="Use rate (for counter OIDs)" hint="Compute bytes/s from delta before comparing">
+          <SelectInput
+            value={String(g('use_rate', false))}
+            onChange={v => set('use_rate', v === 'true')}
+            options={[{ value: 'false', label: 'Raw value (gauge OIDs)' }, { value: 'true', label: 'Rate (bytes/s — counter OIDs)' }]}
+          />
+        </Field>
+        <Field label="Device ID (optional)" hint="Leave blank to check all devices">
+          <TextInput type="number" value={String(g('device_id', ''))} onChange={v => set('device_id', v ? parseInt(v) : undefined)} placeholder="Device ID" />
+        </Field>
+      </div>
+    )
+  }
+
+  if (ruleType === 'metric_spike') {
+    return (
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Field label="OID / Metric">
+          <SelectInput value={String(g('oid_label', 'ifInOctets'))} onChange={v => set('oid_label', v)} options={OID_OPTS} />
+        </Field>
+        <Field label="Spike factor" hint="Alert when recent mean is this many times above baseline (e.g. 3 = 3×)">
+          <TextInput type="number" value={String(g('spike_factor', 3))} onChange={v => set('spike_factor', parseFloat(v) || 3)} />
+        </Field>
+        <Field label="Recent window (minutes)" hint="'Recent' period to compare against baseline">
+          <TextInput type="number" value={String(g('recent_min', 5))} onChange={v => set('recent_min', parseInt(v) || 5)} />
+        </Field>
+        <Field label="Baseline window (minutes)" hint="Longer window used as the baseline average">
+          <TextInput type="number" value={String(g('baseline_min', 60))} onChange={v => set('baseline_min', parseInt(v) || 60)} />
+        </Field>
+        <Field label="Device ID (optional)">
+          <TextInput type="number" value={String(g('device_id', ''))} onChange={v => set('device_id', v ? parseInt(v) : undefined)} placeholder="Device ID" />
+        </Field>
+      </div>
+    )
+  }
+
+  if (ruleType === 'error_rate') {
+    return (
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Field label="Direction">
+          <SelectInput value={String(g('direction', 'both'))} onChange={v => set('direction', v)} options={DIR_OPTS} />
+        </Field>
+        <Field label="Threshold (errors/sec)">
+          <TextInput type="number" value={String(g('threshold', 1))} onChange={v => set('threshold', parseFloat(v) || 1)} />
+        </Field>
+        <Field label="Device ID (optional)">
+          <TextInput type="number" value={String(g('device_id', ''))} onChange={v => set('device_id', v ? parseInt(v) : undefined)} placeholder="Device ID" />
+        </Field>
+      </div>
+    )
+  }
+
+  if (ruleType === 'discard_rate') {
+    return (
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Field label="Direction">
+          <SelectInput value={String(g('direction', 'both'))} onChange={v => set('direction', v)} options={DIR_OPTS} />
+        </Field>
+        <Field label="Threshold (discards/sec)">
+          <TextInput type="number" value={String(g('threshold', 1))} onChange={v => set('threshold', parseFloat(v) || 1)} />
+        </Field>
+        <Field label="Device ID (optional)">
+          <TextInput type="number" value={String(g('device_id', ''))} onChange={v => set('device_id', v ? parseInt(v) : undefined)} placeholder="Device ID" />
+        </Field>
+      </div>
+    )
+  }
+
+  if (ruleType === 'high_error_ratio') {
+    return (
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Field label="Direction">
+          <SelectInput value={String(g('direction', 'both'))} onChange={v => set('direction', v)} options={DIR_OPTS} />
+        </Field>
+        <Field label="Threshold (%)" hint="Alert when errors exceed this % of total packets">
+          <TextInput type="number" value={String(g('threshold', 1))} onChange={v => set('threshold', parseFloat(v) || 1)} />
+        </Field>
+        <Field label="Device ID (optional)">
+          <TextInput type="number" value={String(g('device_id', ''))} onChange={v => set('device_id', v ? parseInt(v) : undefined)} placeholder="Device ID" />
+        </Field>
+      </div>
+    )
+  }
+
+  if (ruleType === 'bandwidth_utilization') {
+    return (
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Field label="Direction">
+          <SelectInput value={String(g('direction', 'both'))} onChange={v => set('direction', v)} options={DIR_OPTS} />
+        </Field>
+        <Field label="Threshold (%)" hint="Alert when interface utilization exceeds this % of ifSpeed">
+          <TextInput type="number" value={String(g('threshold', 80))} onChange={v => set('threshold', parseFloat(v) || 80)} />
+        </Field>
+        <Field label="Device ID (optional)">
+          <TextInput type="number" value={String(g('device_id', ''))} onChange={v => set('device_id', v ? parseInt(v) : undefined)} placeholder="Device ID" />
+        </Field>
+      </div>
+    )
+  }
+
+  if (ruleType === 'speed_change') {
+    return (
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Field label="Minimum change (%)" hint="Alert when ifSpeed changes by more than this percent">
+          <TextInput type="number" value={String(g('delta_pct', 10))} onChange={v => set('delta_pct', parseFloat(v) || 10)} />
+        </Field>
+        <Field label="Device ID (optional)">
+          <TextInput type="number" value={String(g('device_id', ''))} onChange={v => set('device_id', v ? parseInt(v) : undefined)} placeholder="Device ID" />
+        </Field>
+      </div>
+    )
+  }
+
+  if (ruleType === 'trap_received') {
+    return (
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Field label="Trap OID prefix" hint="Match traps whose OID starts with this value (empty = any trap)">
+          <TextInput value={String(g('trap_oid_prefix', ''))} onChange={v => set('trap_oid_prefix', v)} placeholder="e.g. 1.3.6.1.6.3.1.1.5" />
+        </Field>
+        <Field label="Device ID (optional)" hint="Leave blank to match traps from any device">
+          <TextInput type="number" value={String(g('device_id', ''))} onChange={v => set('device_id', v ? parseInt(v) : undefined)} placeholder="Device ID" />
+        </Field>
+      </div>
+    )
+  }
+
+  if (ruleType === 'collector_gap') {
+    return (
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Field label="Silence threshold (minutes)" hint="Alert when no polls arrive from the collector for this long">
+          <TextInput type="number" value={String(g('silence_minutes', 15))} onChange={v => set('silence_minutes', parseInt(v) || 15)} />
+        </Field>
+        <Field label="Collector ID (optional)" hint="Leave blank to monitor all collectors">
+          <TextInput type="number" value={String(g('collector_id', ''))} onChange={v => set('collector_id', v ? parseInt(v) : undefined)} placeholder="Collector ID" />
         </Field>
       </div>
     )
@@ -649,6 +870,7 @@ function RuleForm({
 type Tab = 'active' | 'history' | 'rules'
 
 export default function Alerts() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [tab, setTab]               = useState<Tab>('active')
   const [events, setEvents]         = useState<AlertEvent[]>([])
   const [history, setHistory]       = useState<AlertEvent[]>([])
@@ -656,6 +878,7 @@ export default function Alerts() {
   const [loading, setLoading]       = useState(false)
   const [editRule, setEditRule]     = useState<AlertRule | null>(null)
   const [addingRule, setAddingRule] = useState(false)
+  const [newRuleInitial, setNewRuleInitial] = useState<typeof EMPTY_RULE>(EMPTY_RULE)
   const [saving, setSaving]         = useState(false)
   const [error, setError]           = useState('')
   const [eventsFilter, setEventsFilter]         = useState('')
@@ -701,6 +924,30 @@ export default function Alerts() {
     loadEvents()
     loadRules()
   }, [loadEvents, loadRules])
+
+  // Handle ?new=<rule_type>&device_id=<id> URL params from Metrics / Dashboard
+  useEffect(() => {
+    const newType  = searchParams.get('new')
+    const deviceId = searchParams.get('device_id')
+    const devName  = searchParams.get('device_name')
+    if (!newType) return
+    const defaults = RULE_DEFAULTS[newType]
+    const initial: typeof EMPTY_RULE = {
+      ...EMPTY_RULE,
+      rule_type:   newType,
+      name:        defaults?.name ?? '',
+      description: defaults?.description ?? '',
+      conditions:  deviceId ? { device_id: parseInt(deviceId, 10) } : {},
+    }
+    if (devName && defaults) {
+      initial.name = `${defaults.name} — ${devName}`
+    }
+    setNewRuleInitial(initial)
+    setAddingRule(true)
+    setTab('rules')
+    // Clear the params so re-visiting the page doesn't re-open the form
+    setSearchParams({}, { replace: true })
+  }, [])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleAck = async (id: number) => {
     await fetch(`/api/alerts/events/${id}/ack`, { method: 'POST', headers: authHeaders() })
@@ -947,7 +1194,7 @@ export default function Alerts() {
         <div className="space-y-4">
           {addingRule && (
             <RuleForm
-              initial={EMPTY_RULE}
+              initial={newRuleInitial}
               onSave={handleSaveRule}
               onCancel={() => setAddingRule(false)}
               saving={saving}

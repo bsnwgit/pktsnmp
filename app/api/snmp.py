@@ -11,7 +11,7 @@ import time
 from typing import Annotated, Any, Optional
 
 import aiosqlite
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Security, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Security, UploadFile, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
@@ -54,6 +54,7 @@ async def _get_collector_by_token(token: str, db: aiosqlite.Connection) -> dict 
 
 
 async def collector_auth(
+    request: Request,
     credentials: Annotated[Optional[HTTPAuthorizationCredentials], Security(_collector_bearer)] = None,
     db: aiosqlite.Connection = Depends(get_db),
 ) -> dict:
@@ -61,7 +62,29 @@ async def collector_auth(
         raise HTTPException(status_code=401, detail="Collector token required")
     collector = await _get_collector_by_token(credentials.credentials, db)
     if not collector:
+        # Track failure — match inbound IP to a collector so the UI can surface it
+        client_ip = request.client.host if request.client else None
+        if client_ip:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT id FROM collectors WHERE ip=? OR ssh_host=?", (client_ip, client_ip)
+            ) as cur:
+                matched = await cur.fetchone()
+            if matched:
+                await db.execute(
+                    "UPDATE collectors SET auth_failure_count = auth_failure_count + 1, "
+                    "last_auth_failure_at = datetime('now'), updated_at = datetime('now') WHERE id=?",
+                    (matched["id"],),
+                )
+                await db.commit()
         raise HTTPException(status_code=401, detail="Invalid collector token")
+    # Good auth — reset any lingering failure state
+    await db.execute(
+        "UPDATE collectors SET auth_failure_count = 0, last_auth_failure_at = NULL, "
+        "updated_at = datetime('now') WHERE id=?",
+        (collector["id"],),
+    )
+    await db.commit()
     return collector
 
 
@@ -75,10 +98,39 @@ _COLLECTOR_SSH_FIELDS = (
 
 
 def _mask_collector(collector: dict) -> dict:
+    from datetime import datetime, timezone
     d = dict(collector)
     for field in _SSH_SECRET_FIELDS:
         if d.get(field):
             d[field] = _MASK          # "key saved" signal for the UI
+
+    # Derive effective_status from observed health signals (not stored, computed each time)
+    #   error   — recent auth failures (last_auth_failure_at within 15 min)
+    #   offline — no recent OTLP ingest (last_seen null or older than 10 min)
+    #   online  — data flowing normally
+    now = datetime.now(timezone.utc)
+
+    def _parse_utc(ts: str | None) -> datetime | None:
+        if not ts:
+            return None
+        try:
+            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            return None
+
+    failures = d.get("auth_failure_count") or 0
+    last_fail = _parse_utc(d.get("last_auth_failure_at"))
+    last_seen = _parse_utc(d.get("last_seen"))
+
+    if failures > 0 and last_fail and (now - last_fail).total_seconds() < 900:
+        effective = "error"
+    elif last_seen and (now - last_seen).total_seconds() < 600:
+        effective = "online"
+    else:
+        effective = "offline"
+
+    d["effective_status"] = effective
     return d
 
 
@@ -90,10 +142,13 @@ def _mask_device(device: dict) -> dict:
     return d
 
 
+_CRED_SECRET_FIELDS = {"auth_key_enc", "priv_key_enc", "community"}
+
+
 def _mask_credential(cred: dict) -> dict:
     d = dict(cred)
-    for field in _V3_SECRET_FIELDS:
-        if d.get(field):
+    for field in _CRED_SECRET_FIELDS:
+        if d.get(field) is not None:
             d[field] = _MASK
     return d
 
@@ -155,27 +210,37 @@ class CollectorSSHUpdate(BaseModel):
 class DeviceCreate(BaseModel):
     name: str
     ip: str
-    site: str = ""
+    org: str = ""          # Org (top level)
+    groups: str = ""       # Group (second level; 'group' is a SQL keyword so column is 'groups')
+    site: str = ""         # Site (third level; was 'location' before migration 011)
+    device_type: str = ""  # firewall|switch|wap|wlc|router|iot|ups|server|storage|pdu|camera|load_balancer|vpn|printer|other|''
     collector_id: int = 1
     credential_id: int | None = None
     poll_interval_override: int | None = None
     otelcol_label: str | None = None
     otelcol_pipeline: str | None = None    # e.g. 'metrics/switch', 'metrics/firewall'
     enabled: bool = True
-    ha_role: str | None = None
+    parent_device_id: int | None = None
+    ha_role: str | None = None   # 'active' | 'passive' | 'standalone' | None
+    ha_peer_id: int | None = None  # ID of the HA partner device
 
 
 class DeviceUpdate(BaseModel):
     name: str | None = None
     ip: str | None = None
+    org: str | None = None
+    groups: str | None = None
     site: str | None = None
+    device_type: str | None = None
     collector_id: int | None = None
     credential_id: int | None = None
     poll_interval_override: int | None = None
     otelcol_label: str | None = None
     otelcol_pipeline: str | None = None
     enabled: bool | None = None
-    ha_role: str | None = None
+    parent_device_id: int | None = None
+    ha_role: str | None = None   # 'active' | 'passive' | 'standalone' | None
+    ha_peer_id: int | None = None  # ID of the HA partner device
 
 
 class OidCatalogCreate(BaseModel):
@@ -208,7 +273,13 @@ async def snmp_status(_: CurrentUser, db: aiosqlite.Connection = Depends(get_db)
         down_devices = (await cur.fetchone())["down"]
     async with db.execute("SELECT COUNT(*) AS total FROM collectors") as cur:
         total_collectors = (await cur.fetchone())["total"]
-    async with db.execute("SELECT COUNT(*) AS online FROM collectors WHERE status='online'") as cur:
+    async with db.execute(
+        """SELECT COUNT(*) AS online FROM collectors
+           WHERE (auth_failure_count = 0 OR last_auth_failure_at IS NULL
+                  OR last_auth_failure_at < datetime('now', '-15 minutes'))
+             AND last_seen IS NOT NULL
+             AND last_seen >= datetime('now', '-10 minutes')"""
+    ) as cur:
         online_collectors = (await cur.fetchone())["online"]
     async with db.execute("SELECT COUNT(*) AS total FROM snmp_credentials") as cur:
         total_creds = (await cur.fetchone())["total"]
@@ -287,6 +358,9 @@ async def update_credential(cred_id: int, body: CredentialUpdate, _: AdminUser, 
         val = updates.pop("priv_key")
         if val and val != _MASK:
             d["priv_key_enc"] = _encrypt(val)
+    # community is masked in GET responses — only update if a real value was sent
+    if "community" in updates and updates["community"] == _MASK:
+        updates.pop("community")
     d.update(updates)
     await db.execute(
         """UPDATE snmp_credentials SET name=?, description=?, snmp_version=?, community=?,
@@ -324,6 +398,7 @@ _COLLECTOR_SELECT = """
            ssh_key_enc, ssh_password_enc,
            otelcol_config_path, otelcol_service,
            sync_status, last_synced_at, last_sync_error,
+           auth_failure_count, last_auth_failure_at,
            created_at, updated_at
     FROM collectors
 """
@@ -593,16 +668,16 @@ async def _load_devices_for_push(collector_id: int, db: aiosqlite.Connection) ->
 # =============================================================================
 
 _DEVICE_SELECT = """
-    SELECT d.id, d.name, d.ip, d.site, d.collector_id, d.credential_id,
+    SELECT d.id, d.name, d.ip, d.org, d.groups, d.site, d.device_type,
+           d.collector_id, d.credential_id,
            d.poll_interval_override, d.last_seen, d.status, d.last_error,
-           d.otelcol_label, d.otelcol_pipeline, d.enabled, d.ha_role,
-           d.created_at, d.updated_at,
+           d.otelcol_label, d.otelcol_pipeline, d.enabled, d.created_at, d.updated_at,
+           d.parent_device_id, d.ha_role, d.ha_peer_id,
            d.snmp_version AS device_snmp_version,
            d.community AS device_community,
            col.name AS collector_name,
            cred.name AS credential_name,
            cred.snmp_version AS cred_snmp_version,
-           cred.community AS cred_community,
            cred.security_level AS cred_security_level
     FROM devices d
     LEFT JOIN collectors col ON col.id = d.collector_id
@@ -624,7 +699,7 @@ async def list_devices(
     if collector_id is not None:
         conditions.append("d.collector_id=?"); params.append(collector_id)
     if site:
-        conditions.append("d.site=?"); params.append(site)
+        conditions.append("d.groups=?"); params.append(site)
     if enabled is not None:
         conditions.append("d.enabled=?"); params.append(1 if enabled else 0)
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
@@ -632,6 +707,265 @@ async def list_devices(
     async with db.execute(sql, params) as cur:
         rows = await cur.fetchall()
     return [dict(r) for r in rows]
+
+
+@router.get("/devices/tree")
+async def device_tree(_: CurrentUser, db: aiosqlite.Connection = Depends(get_db)) -> list[dict]:
+    """Return the full environment tree: Org → Group → Site → Root Devices → Child Devices.
+
+    DB columns: org (Org), site (Group in UI), location (Site in UI).
+    Virtual grouping node types: 'org', 'group', 'site'.
+    Device nodes: type='device'. Passive HA devices hidden; children redirect to active peer.
+    """
+    from collections import defaultdict
+    db.row_factory = aiosqlite.Row
+
+    # Fetch ALL devices (passive too) to build peer map
+    async with db.execute(
+        """SELECT id, name, ip, org, groups, site, device_type, status, enabled,
+                  parent_device_id, ha_role, ha_peer_id, last_seen
+           FROM devices ORDER BY name"""
+    ) as cur:
+        device_rows = await cur.fetchall()
+
+    # peer_map: passive_id → active_id
+    peer_map: dict[int, int] = {}
+    for r in device_rows:
+        if r["ha_role"] not in (None, "active", "standalone") and r["ha_peer_id"]:
+            peer_map[r["id"]] = r["ha_peer_id"]
+
+    # Display-worthy: non-passive devices only
+    display_ids = {r["id"] for r in device_rows
+                   if r["ha_role"] is None or r["ha_role"] in ("active", "standalone")}
+
+    # Build flat node map
+    nodes: dict[int, dict] = {}
+    for r in device_rows:
+        if r["id"] not in display_ids:
+            continue
+        is_down = (r["status"] == "down") and bool(r["enabled"])
+        nodes[r["id"]] = {
+            "type": "device",
+            "id": r["id"],
+            "name": r["name"],
+            "ip": r["ip"],
+            "org": r["org"] or "",
+            "groups": r["groups"] or "",      # "Group" in UI
+            "site": r["site"] or "",          # "Site" in UI
+            "device_type": r["device_type"] or "",
+            "status": r["status"] or "unknown",
+            "enabled": bool(r["enabled"]),
+            "parent_device_id": r["parent_device_id"],
+            "ha_role": r["ha_role"],
+            "ha_peer_id": r["ha_peer_id"],
+            "last_seen": r["last_seen"],
+            "direct_alerts": 1 if is_down else 0,
+            "subtree_alerts": 1 if is_down else 0,
+            "children": [],
+        }
+
+    # Wire device parent → child; passive parents redirect to active peer
+    device_roots: list[dict] = []
+    for node in nodes.values():
+        pid = node["parent_device_id"]
+        if pid in peer_map:
+            pid = peer_map[pid]
+        if pid and pid in nodes:
+            nodes[pid]["children"].append(node)
+        else:
+            device_roots.append(node)
+
+    # Post-order DFS: propagate subtree_alerts up through device trees
+    def _propagate(node: dict) -> int:
+        total = node["direct_alerts"]
+        for child in node["children"]:
+            total += _propagate(child)
+        node["subtree_alerts"] = total
+        return total
+
+    for root in device_roots:
+        _propagate(root)
+
+    # Group root devices: org → groups (Group) → site (Site)
+    tree: dict[str, dict[str, dict[str, list[dict]]]] = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+    for dev in device_roots:
+        org  = dev["org"] or "(Unassigned)"
+        grp  = dev["groups"] or "(Unassigned)"
+        site = dev["site"] or "(Unassigned)"
+        tree[org][grp][site].append(dev)
+
+    result: list[dict] = []
+    for org_name in sorted(tree):
+        org_alerts = 0
+        org_children: list[dict] = []
+        for grp_name in sorted(tree[org_name]):
+            grp_alerts = 0
+            grp_children: list[dict] = []
+            for site_name in sorted(tree[org_name][grp_name]):
+                devs = tree[org_name][grp_name][site_name]
+                site_alerts = sum(d["subtree_alerts"] for d in devs)
+                grp_children.append({
+                    "type": "site",
+                    "name": site_name,
+                    "direct_alerts": 0,
+                    "subtree_alerts": site_alerts,
+                    "children": devs,
+                })
+                grp_alerts += site_alerts
+            org_children.append({
+                "type": "group",
+                "name": grp_name,
+                "direct_alerts": 0,
+                "subtree_alerts": grp_alerts,
+                "children": grp_children,
+            })
+            org_alerts += grp_alerts
+        result.append({
+            "type": "org",
+            "name": org_name,
+            "direct_alerts": 0,
+            "subtree_alerts": org_alerts,
+            "children": org_children,
+        })
+
+    return result
+
+
+@router.get("/devices/export")
+async def export_devices(_: CurrentUser, db: aiosqlite.Connection = Depends(get_db)):
+    """Export all devices as a CSV file download."""
+    import csv
+    import io
+    from fastapi.responses import StreamingResponse
+
+    db.row_factory = aiosqlite.Row
+    async with db.execute(
+        """SELECT d.name, d.ip, d.org, d.groups, d.site, d.device_type,
+                  d.otelcol_label, d.enabled, d.poll_interval_override, d.ha_role,
+                  col.name AS collector_name,
+                  cred.name AS credential_name
+           FROM devices d
+           LEFT JOIN collectors col ON col.id = d.collector_id
+           LEFT JOIN snmp_credentials cred ON cred.id = d.credential_id
+           ORDER BY d.name"""
+    ) as cur:
+        rows = await cur.fetchall()
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        "name", "ip", "org", "groups", "site", "device_type",
+        "otelcol_label", "enabled", "poll_interval_override",
+        "ha_role", "collector_name", "credential_name",
+    ])
+    for r in rows:
+        writer.writerow([
+            r["name"], r["ip"],
+            r["org"] or "", r["groups"] or "", r["site"] or "", r["device_type"] or "",
+            r["otelcol_label"] or "",
+            "true" if r["enabled"] else "false",
+            r["poll_interval_override"] if r["poll_interval_override"] is not None else "",
+            r["ha_role"] or "",
+            r["collector_name"] or "", r["credential_name"] or "",
+        ])
+    buf.seek(0)
+    return StreamingResponse(
+        io.BytesIO(buf.getvalue().encode("utf-8")),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="pktsnmp-devices.csv"'},
+    )
+
+
+@router.post("/devices/import-csv")
+async def import_devices_csv(
+    file: UploadFile,
+    _: AdminUser,
+    db: aiosqlite.Connection = Depends(get_db),
+) -> dict:
+    """Import devices from a multipart CSV upload.
+
+    CSV columns (header row required):
+      name, ip, org, groups, site, device_type, otelcol_label, enabled,
+      poll_interval_override, ha_role, collector_name, credential_name
+
+    - Rows are inserted; duplicate IPs are skipped (not updated).
+    - collector_name and credential_name are matched by name (case-sensitive).
+      Unknown collector_name defaults to the built-in local collector (id=1).
+      Unknown credential_name leaves credential_id as NULL.
+    """
+    import csv, io
+
+    raw = await file.read()
+    text = raw.decode("utf-8-sig")  # strip BOM (Excel exports)
+
+    db.row_factory = aiosqlite.Row
+    async with db.execute("SELECT id, name FROM collectors") as cur:
+        col_map = {r["name"]: r["id"] for r in await cur.fetchall()}
+    async with db.execute("SELECT id, name FROM snmp_credentials") as cur:
+        cred_map = {r["name"]: r["id"] for r in await cur.fetchall()}
+
+    reader = csv.DictReader(io.StringIO(text))
+    created = 0
+    skipped = 0
+    errors: list[str] = []
+
+    for lineno, row in enumerate(reader, start=2):
+        name = (row.get("name") or "").strip()
+        ip   = (row.get("ip") or "").strip()
+        if not name or not ip:
+            errors.append(f"Row {lineno}: missing name or ip — skipped")
+            skipped += 1
+            continue
+
+        col_name  = (row.get("collector_name") or "").strip()
+        cred_name = (row.get("credential_name") or "").strip()
+        collector_id  = col_map.get(col_name, 1)
+        credential_id = cred_map.get(cred_name)
+
+        enabled_str = (row.get("enabled") or "true").strip().lower()
+        enabled = enabled_str not in ("false", "0", "no")
+
+        poll_str = (row.get("poll_interval_override") or "").strip()
+        poll_override = int(poll_str) if poll_str.lstrip("-").isdigit() else None
+
+        ha_role = (row.get("ha_role") or "").strip() or None
+        if ha_role not in (None, "active", "passive", "standalone"):
+            ha_role = None
+
+        try:
+            async with db.execute(
+                """INSERT OR IGNORE INTO devices
+                    (name, ip, org, groups, site, device_type, otelcol_label,
+                     enabled, poll_interval_override, ha_role,
+                     collector_id, credential_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id""",
+                (
+                    name, ip,
+                    (row.get("org") or "").strip(),
+                    (row.get("groups") or "").strip(),
+                    (row.get("site") or "").strip(),
+                    (row.get("device_type") or "").strip(),
+                    (row.get("otelcol_label") or "").strip() or None,
+                    1 if enabled else 0,
+                    poll_override,
+                    ha_role,
+                    collector_id,
+                    credential_id,
+                ),
+            ) as cur:
+                result_row = await cur.fetchone()
+            if result_row:
+                created += 1
+            else:
+                skipped += 1
+                errors.append(f"Row {lineno}: {name} ({ip}) already exists — skipped")
+        except Exception as exc:
+            errors.append(f"Row {lineno}: {name} ({ip}): {exc}")
+            skipped += 1
+
+    await db.commit()
+    _signal_reload()
+    return {"created": created, "skipped": skipped, "errors": errors}
 
 
 @router.get("/devices/{device_id}")
@@ -650,21 +984,30 @@ async def create_device(body: DeviceCreate, _: AdminUser, db: aiosqlite.Connecti
     try:
         async with db.execute(
             """INSERT INTO devices
-                (name, ip, site, collector_id, credential_id,
-                 poll_interval_override, otelcol_label, otelcol_pipeline, enabled, ha_role)
-               VALUES (?,?,?,?,?,?,?,?,?,?) RETURNING id""",
-            (body.name, body.ip, body.site, body.collector_id, body.credential_id,
+                (name, ip, org, groups, site, device_type, collector_id, credential_id,
+                 poll_interval_override, otelcol_label, otelcol_pipeline, enabled,
+                 parent_device_id, ha_role, ha_peer_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id""",
+            (body.name, body.ip, body.org, body.groups, body.site, body.device_type,
+             body.collector_id, body.credential_id,
              body.poll_interval_override, body.otelcol_label, body.otelcol_pipeline,
-             1 if body.enabled else 0, body.ha_role),
+             1 if body.enabled else 0, body.parent_device_id, body.ha_role, body.ha_peer_id),
         ) as cur:
             row = await cur.fetchone()
+        new_id = row[0]
         await db.commit()
     except Exception as e:
         if "UNIQUE" in str(e):
             raise HTTPException(status_code=409, detail="Device IP already registered")
         raise
+    # Bidirectional HA peer link
+    if body.ha_peer_id:
+        await db.execute(
+            "UPDATE devices SET ha_peer_id=? WHERE id=?", (new_id, body.ha_peer_id)
+        )
+        await db.commit()
     _signal_reload()
-    return {"id": row[0], "name": body.name, "ip": body.ip}
+    return {"id": new_id, "name": body.name, "ip": body.ip}
 
 
 @router.put("/devices/{device_id}")
@@ -675,15 +1018,27 @@ async def update_device(device_id: int, body: DeviceUpdate, _: AdminUser, db: ai
     if not row:
         raise HTTPException(status_code=404, detail="Device not found")
     d = dict(row)
-    d.update(body.model_dump(exclude_none=True))
+    # Handle parent_device_id explicitly — it can be set to None intentionally
+    updates = body.model_dump(exclude_unset=True)
+    d.update(updates)
+    new_peer_id = d.get("ha_peer_id")
     await db.execute(
-        """UPDATE devices SET name=?, ip=?, site=?, collector_id=?, credential_id=?,
+        """UPDATE devices SET name=?, ip=?, org=?, groups=?, site=?, device_type=?,
+            collector_id=?, credential_id=?,
             poll_interval_override=?, otelcol_label=?, otelcol_pipeline=?,
-            enabled=?, ha_role=?, updated_at=datetime('now') WHERE id=?""",
-        (d.get("name"), d.get("ip"), d.get("site"), d.get("collector_id"), d.get("credential_id"),
+            enabled=?, parent_device_id=?, ha_role=?, ha_peer_id=?,
+            updated_at=datetime('now') WHERE id=?""",
+        (d.get("name"), d.get("ip"), d.get("org", ""), d.get("groups", ""), d.get("site", ""),
+         d.get("device_type", ""), d.get("collector_id"), d.get("credential_id"),
          d.get("poll_interval_override"), d.get("otelcol_label"), d.get("otelcol_pipeline"),
-         d.get("enabled"), d.get("ha_role"), device_id),
+         d.get("enabled"), d.get("parent_device_id"), d.get("ha_role"), new_peer_id, device_id),
     )
+    # Bidirectional HA peer link: keep the partner in sync
+    if new_peer_id:
+        await db.execute(
+            "UPDATE devices SET ha_peer_id=? WHERE id=? AND (ha_peer_id IS NULL OR ha_peer_id=?)",
+            (device_id, new_peer_id, device_id),
+        )
     await db.commit()
     _signal_reload()
     return {"id": device_id, "updated": True}
@@ -856,12 +1211,12 @@ async def _do_ingest_otlp(request: Request, collector: dict, db: aiosqlite.Conne
             )
         result["device_id"], result["device_ip"] = device_cache[label]
     await storage.ingest_poll_results_bulk(results)
-    device_ids = {v[0] for v in device_cache.values() if v[0] is not None}
-    for device_id in device_ids:
+    # Update last_seen + status for every device that reported data this batch
+    seen_device_ids = {v[0] for v in device_cache.values() if v[0] is not None}
+    for did in seen_device_ids:
         await db.execute(
-            "UPDATE devices SET status='up', last_seen=datetime('now'), "
-            "updated_at=datetime('now') WHERE id=?",
-            (device_id,),
+            "UPDATE devices SET last_seen=datetime('now'), status='up', updated_at=datetime('now') WHERE id=?",
+            (did,),
         )
     await db.execute(
         "UPDATE collectors SET last_seen=datetime('now'), status='online', updated_at=datetime('now') WHERE id=?",
@@ -884,7 +1239,8 @@ async def ingest_otlp_v1_metrics(request: Request, collector: dict = Depends(col
 @router.post("/ingest/heartbeat", status_code=200)
 async def ingest_heartbeat(body: dict, collector: dict = Depends(collector_auth), db: aiosqlite.Connection = Depends(get_db)) -> dict:
     await db.execute(
-        "UPDATE collectors SET last_seen=datetime('now'), status='online', version=?, updated_at=datetime('now') WHERE id=?",
+        "UPDATE collectors SET last_seen=datetime('now'), status='online', version=?, "
+        "auth_failure_count=0, last_auth_failure_at=NULL, updated_at=datetime('now') WHERE id=?",
         (body.get("version"), collector["id"]),
     )
     await db.commit()
@@ -927,6 +1283,298 @@ async def device_latest(device_id: int, _: CurrentUser, db: aiosqlite.Connection
         raise HTTPException(status_code=404, detail="Device not found")
     from app.storage.factory import get_storage
     return await get_storage().get_device_latest(device_id)
+
+
+# =============================================================================
+# METRICS API (charts, Metrics page, alert engine)
+# =============================================================================
+
+def _parse_since(since: str | None) -> tuple[str | None, int]:
+    """Parse a 'since' string into (iso_datetime, bucket_seconds).
+
+    Accepts relative shortcuts ("1h", "6h", "24h", "7d") or an ISO datetime.
+    Returns (since_iso, bucket_seconds) where bucket_seconds drives downsampling:
+      1h  → raw (0)      6h → 5-min (300)
+      24h → 15-min (900) 7d → 1-hour (3600)
+      custom/long → auto-select based on span
+    """
+    from datetime import datetime, timezone, timedelta
+
+    if not since:
+        return None, 0
+
+    _shortcuts = {
+        "1h":  (timedelta(hours=1),  0),
+        "6h":  (timedelta(hours=6),  300),
+        "24h": (timedelta(hours=24), 900),
+        "7d":  (timedelta(days=7),   3600),
+    }
+    if since in _shortcuts:
+        delta, bucket = _shortcuts[since]
+        iso = (datetime.now(tz=timezone.utc) - delta).isoformat()
+        return iso, bucket
+
+    # Treat as ISO datetime — auto-compute bucket from span
+    try:
+        dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        span_hours = (datetime.now(tz=timezone.utc) - dt).total_seconds() / 3600
+        if span_hours <= 1.5:
+            bucket = 0
+        elif span_hours <= 8:
+            bucket = 300
+        elif span_hours <= 30:
+            bucket = 900
+        else:
+            bucket = 3600
+        return dt.isoformat(), bucket
+    except Exception:
+        return None, 0
+
+
+@router.get("/devices/{device_id}/metrics/latest")
+async def device_metrics_latest(
+    device_id: int,
+    _: CurrentUser,
+    db: aiosqlite.Connection = Depends(get_db),
+) -> list[dict]:
+    """Latest value per OID for a registered device.
+    Used by the Dashboard mini-panel and Metrics page header stats.
+    """
+    db.row_factory = aiosqlite.Row
+    async with db.execute("SELECT id, ip FROM devices WHERE id=?", (device_id,)) as cur:
+        row = await cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Device not found")
+    from app.storage.factory import get_storage
+    return await get_storage().get_device_latest(device_id)
+
+
+@router.get("/devices/{device_id}/metrics/history")
+async def device_metrics_history(
+    device_id: int,
+    _: CurrentUser,
+    db: aiosqlite.Connection = Depends(get_db),
+    oid_labels: str | None = Query(None, description="Comma-separated OID labels; omit for all"),
+    since: str | None = Query("1h", description="Relative: 1h|6h|24h|7d, or ISO datetime"),
+    until: str | None = Query(None, description="ISO datetime upper bound (default: now)"),
+    format: str | None = Query(None, description="'csv' to download as CSV"),
+    limit: int = Query(2000, ge=1, le=10000),
+    if_index: int | None = Query(None, description="Legacy: ignored (oid column is NULL)"),
+    interface_label: str | None = Query(None, description="Filter to a specific interface (ifDescr value)"),
+) -> Any:
+    """Time-bucketed SNMP poll history for chart rendering.
+
+    Response shape:
+    {
+      "series": [ { "bucket_ts", "oid_label", "avg_value", "max_value", "min_value", "sample_count" }, ... ],
+      "alert_events": [ { "id", "fired_at", "severity", "message", "rule_name" }, ... ],
+      "trap_events":  [ { "id", "received_at", "trap_oid", "source_ip" }, ... ],
+      "bucket_seconds": 0 | 300 | 900 | 3600,
+      "since_iso": "...",
+    }
+    """
+    from fastapi.responses import StreamingResponse
+    import csv as _csv, io as _io
+
+    db.row_factory = aiosqlite.Row
+    async with db.execute("SELECT id, ip FROM devices WHERE id=?", (device_id,)) as cur:
+        row = await cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    device_ip = dict(row)["ip"]
+    since_iso, bucket_seconds = _parse_since(since)
+    labels = [l.strip() for l in oid_labels.split(",")] if oid_labels else None
+
+    from app.storage.factory import get_storage
+    storage = get_storage()
+
+    series = await storage.query_poll_history_bucketed(
+        device_id=device_id,
+        oid_labels=labels,
+        since_iso=since_iso,
+        until_iso=until,
+        bucket_seconds=bucket_seconds,
+        limit=limit,
+        interface_label=interface_label,
+    )
+
+    # Companion: alert events in the same time window
+    alert_events: list[dict] = []
+    ae_conditions = ["ae.device_id = ?"]
+    ae_params: list[Any] = [device_id]
+    if since_iso:
+        ae_conditions.append("ae.fired_at >= ?")
+        ae_params.append(since_iso)
+    if until:
+        ae_conditions.append("ae.fired_at <= ?")
+        ae_params.append(until)
+    ae_where = "WHERE " + " AND ".join(ae_conditions)
+    async with db.execute(
+        f"""SELECT ae.id, ae.fired_at, ae.severity, ae.message, ae.resolved_at,
+                   ae.auto_resolved, ar.name AS rule_name
+            FROM alert_events ae
+            JOIN alert_rules ar ON ar.id = ae.rule_id
+            {ae_where}
+            ORDER BY ae.fired_at ASC LIMIT 500""",
+        ae_params,
+    ) as cur:
+        alert_events = [dict(r) for r in await cur.fetchall()]
+
+    # Companion: trap events in the same time window
+    trap_events = await storage.query_trap_events(
+        device_id=device_id,
+        since_iso=since_iso,
+        until_iso=until,
+        limit=200,
+    )
+
+    if format == "csv":
+        buf = _io.StringIO()
+        writer = _csv.writer(buf)
+        writer.writerow(["bucket_ts", "oid_label", "avg_value", "max_value", "min_value", "sample_count"])
+        for row in series:
+            writer.writerow([row["bucket_ts"], row["oid_label"], row["avg_value"],
+                             row["max_value"], row["min_value"], row["sample_count"]])
+        buf.seek(0)
+        return StreamingResponse(
+            _io.BytesIO(buf.getvalue().encode("utf-8")),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="device-{device_id}-metrics.csv"'},
+        )
+
+    return {
+        "series": series,
+        "alert_events": alert_events,
+        "trap_events": trap_events,
+        "bucket_seconds": bucket_seconds,
+        "since_iso": since_iso,
+    }
+
+
+@router.get("/devices/by-ip/{device_ip:path}/metrics/latest")
+async def device_metrics_latest_by_ip(
+    device_ip: str,
+    _: CurrentUser,
+) -> list[dict]:
+    """Latest values for unregistered devices (dental path labels, etc.).
+    Used when device_id is not known.
+    """
+    from app.storage.factory import get_storage
+    return await get_storage().get_device_latest_by_ip(device_ip)
+
+
+@router.get("/collectors/{collector_id}/ingest-rate")
+async def collector_ingest_rate(
+    collector_id: int,
+    _: CurrentUser,
+    db: aiosqlite.Connection = Depends(get_db),
+    hours: int = Query(1, ge=1, le=24),
+    bucket_minutes: int = Query(5, ge=1, le=60),
+) -> list[dict]:
+    """Polls-per-bucket sparkline for the Collectors page health view.
+
+    Returns: [ { "bucket_ts", "poll_count", "active_devices" }, ... ]
+    """
+    db.row_factory = aiosqlite.Row
+    async with db.execute("SELECT id FROM collectors WHERE id=?", (collector_id,)) as cur:
+        if not await cur.fetchone():
+            raise HTTPException(status_code=404, detail="Collector not found")
+    from app.storage.factory import get_storage
+    return await get_storage().get_ingest_rate(
+        collector_id=collector_id, hours=hours, bucket_minutes=bucket_minutes
+    )
+
+
+@router.get("/metrics/overview")
+async def metrics_overview(
+    _: CurrentUser,
+    db: aiosqlite.Connection = Depends(get_db),
+) -> list[dict]:
+    """All-device metrics overview for the dashboard cards view.
+
+    Returns ALL registered devices regardless of whether they have SNMP data.
+    No-data devices are included with has_data=false so missing data is visible.
+
+    Response per item:
+    {
+      "device": { id, name, ip, device_type, status, org, groups, site, enabled, last_seen },
+      "latest": { "<oid_label>": { value, value_numeric, value_type, polled_at }, ... },
+      "has_data": true|false,
+      "interface_count": N,
+    }
+    """
+    db.row_factory = aiosqlite.Row
+    async with db.execute(
+        """SELECT id, name, ip, device_type, status, org, groups, site, enabled, last_seen
+           FROM devices
+           ORDER BY org ASC, name ASC"""
+    ) as cur:
+        device_rows = await cur.fetchall()
+
+    devices = [dict(r) for r in device_rows]
+    if not devices:
+        return []
+
+    device_ids = [d["id"] for d in devices]
+    from app.storage.factory import get_storage
+    storage = get_storage()
+
+    # Single batch query for all devices' latest metrics
+    batch = await storage.get_all_devices_latest(device_ids)
+
+    result = []
+    for dev in devices:
+        did = dev["id"]
+        latest_rows = batch.get(did, [])
+        latest: dict[str, dict] = {
+            row["oid_label"]: {
+                "value":         row["value"],
+                "value_numeric": row["value_numeric"],
+                "value_type":    row["value_type"],
+                "polled_at":     row["polled_at"],
+            }
+            for row in latest_rows
+        }
+        # Count distinct interfaces from the OID labels present in the latest snapshot.
+        # Any OID whose label is an IF-MIB leaf implies at least one interface; the true
+        # count comes from GET /devices/{id}/interfaces — this is just a quick estimate.
+        if_labels = {k for k in latest if k in (
+            "ifDescr", "ifAlias", "ifName",
+            "ifOperStatus", "ifOperStatusMetric",
+            "ifInOctets", "ifOutOctets",
+        )}
+        result.append({
+            "device":          dev,
+            "latest":          latest,
+            "has_data":        len(latest_rows) > 0,
+            "has_interfaces":  len(if_labels) > 0,
+        })
+
+    return result
+
+
+@router.get("/devices/{device_id}/interfaces")
+async def device_interfaces(
+    device_id: int,
+    _: CurrentUser,
+    db: aiosqlite.Connection = Depends(get_db),
+) -> list[dict]:
+    """Interface list for a device.
+
+    otelcol attaches ifDescr/ifName as metric attributes; the parser stores
+    them in the interface_label column. Returns one entry per distinct interface.
+
+    Each interface: { interface_label, name, oper_status, admin_status, speed_mbps, if_type, mac }
+    """
+    db.row_factory = aiosqlite.Row
+    async with db.execute("SELECT id FROM devices WHERE id=?", (device_id,)) as cur:
+        if not await cur.fetchone():
+            raise HTTPException(status_code=404, detail="Device not found")
+    from app.storage.factory import get_storage
+    return await get_storage().get_device_interfaces(device_id)
 
 
 # =============================================================================
@@ -1000,6 +1648,124 @@ async def snmp_dashboard(_: CurrentUser, db: aiosqlite.Connection = Depends(get_
         },
         "traps_24h": traps_24h,
     }
+
+
+# =============================================================================
+# ORG / GROUP / SITE HIERARCHY MANAGEMENT
+# =============================================================================
+
+class OrgCreate(BaseModel):
+    name: str
+
+
+class GroupDefCreate(BaseModel):
+    name: str
+    org_id: int
+
+
+class SiteDefCreate(BaseModel):
+    name: str
+    group_id: int
+
+
+@router.get("/hierarchy")
+async def get_hierarchy(_: CurrentUser, db: aiosqlite.Connection = Depends(get_db)) -> list[dict]:
+    """Return the full org → group → site hierarchy tree."""
+    db.row_factory = aiosqlite.Row
+    async with db.execute("SELECT id, name FROM orgs ORDER BY name") as cur:
+        orgs = [dict(r) for r in await cur.fetchall()]
+    for org in orgs:
+        async with db.execute(
+            "SELECT id, name FROM groups_def WHERE org_id=? ORDER BY name", (org["id"],)
+        ) as cur:
+            groups = [dict(r) for r in await cur.fetchall()]
+        for grp in groups:
+            async with db.execute(
+                "SELECT id, name FROM sites_def WHERE group_id=? ORDER BY name", (grp["id"],)
+            ) as cur:
+                grp["sites"] = [dict(r) for r in await cur.fetchall()]
+        org["groups"] = groups
+    return orgs
+
+
+@router.post("/hierarchy/orgs", status_code=201)
+async def create_org(body: OrgCreate, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)) -> dict:
+    try:
+        async with db.execute(
+            "INSERT INTO orgs (name) VALUES (?) RETURNING id, name", (body.name.strip(),)
+        ) as cur:
+            row = await cur.fetchone()
+        await db.commit()
+    except Exception as e:
+        if "UNIQUE" in str(e):
+            raise HTTPException(status_code=409, detail=f"Org '{body.name}' already exists")
+        raise
+    return {"id": row[0], "name": row[1], "groups": []}
+
+
+@router.delete("/hierarchy/orgs/{org_id}", status_code=204)
+async def delete_org(org_id: int, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)) -> None:
+    async with db.execute("SELECT id FROM orgs WHERE id=?", (org_id,)) as cur:
+        if not await cur.fetchone():
+            raise HTTPException(status_code=404, detail="Org not found")
+    await db.execute("DELETE FROM orgs WHERE id=?", (org_id,))
+    await db.commit()
+
+
+@router.post("/hierarchy/groups", status_code=201)
+async def create_group_def(body: GroupDefCreate, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)) -> dict:
+    async with db.execute("SELECT id FROM orgs WHERE id=?", (body.org_id,)) as cur:
+        if not await cur.fetchone():
+            raise HTTPException(status_code=404, detail="Org not found")
+    try:
+        async with db.execute(
+            "INSERT INTO groups_def (org_id, name) VALUES (?,?) RETURNING id, name, org_id",
+            (body.org_id, body.name.strip()),
+        ) as cur:
+            row = await cur.fetchone()
+        await db.commit()
+    except Exception as e:
+        if "UNIQUE" in str(e):
+            raise HTTPException(status_code=409, detail=f"Group '{body.name}' already exists in this org")
+        raise
+    return {"id": row[0], "name": row[1], "org_id": row[2], "sites": []}
+
+
+@router.delete("/hierarchy/groups/{group_id}", status_code=204)
+async def delete_group_def(group_id: int, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)) -> None:
+    async with db.execute("SELECT id FROM groups_def WHERE id=?", (group_id,)) as cur:
+        if not await cur.fetchone():
+            raise HTTPException(status_code=404, detail="Group not found")
+    await db.execute("DELETE FROM groups_def WHERE id=?", (group_id,))
+    await db.commit()
+
+
+@router.post("/hierarchy/sites", status_code=201)
+async def create_site_def(body: SiteDefCreate, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)) -> dict:
+    async with db.execute("SELECT id FROM groups_def WHERE id=?", (body.group_id,)) as cur:
+        if not await cur.fetchone():
+            raise HTTPException(status_code=404, detail="Group not found")
+    try:
+        async with db.execute(
+            "INSERT INTO sites_def (group_id, name) VALUES (?,?) RETURNING id, name, group_id",
+            (body.group_id, body.name.strip()),
+        ) as cur:
+            row = await cur.fetchone()
+        await db.commit()
+    except Exception as e:
+        if "UNIQUE" in str(e):
+            raise HTTPException(status_code=409, detail=f"Site '{body.name}' already exists in this group")
+        raise
+    return {"id": row[0], "name": row[1], "group_id": row[2]}
+
+
+@router.delete("/hierarchy/sites/{site_id}", status_code=204)
+async def delete_site_def(site_id: int, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)) -> None:
+    async with db.execute("SELECT id FROM sites_def WHERE id=?", (site_id,)) as cur:
+        if not await cur.fetchone():
+            raise HTTPException(status_code=404, detail="Site not found")
+    await db.execute("DELETE FROM sites_def WHERE id=?", (site_id,))
+    await db.commit()
 
 
 def _signal_reload() -> None:

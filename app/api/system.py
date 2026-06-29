@@ -29,15 +29,9 @@ router = APIRouter()
 
 
 async def _delayed_restart(delay: float = 1.5) -> None:
-    """Wait briefly, then signal systemd to restart this service."""
+    """Wait briefly, then exit so systemd restarts the service."""
     await asyncio.sleep(delay)
-    proc = subprocess.run(
-        ["sudo", "systemctl", "restart", "pktsnmp"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    if proc.returncode != 0:
-        os.kill(os.getppid(), signal.SIGTERM)
+    os._exit(1)  # non-zero exit triggers systemd Restart=on-failure
 
 
 @router.post("/cleanup", dependencies=[Depends(require_admin)])
