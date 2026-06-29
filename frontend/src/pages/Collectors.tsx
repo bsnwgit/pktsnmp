@@ -5,7 +5,7 @@
  * All users can view collector status and sync state.
  */
 import { useEffect, useRef, useState } from 'react'
-import { getToken } from '../api/client'
+import { getToken, api, IngestRateBucket } from '../api/client'
 
 interface Collector {
   id: number
@@ -391,6 +391,7 @@ export default function Collectors() {
   const [preview, setPreview]       = useState<{ id: number; name: string } | null>(null)
   const [syncing, setSyncing]       = useState<number | null>(null)
   const [syncResult, setSyncResult] = useState<{ id: number; ok: boolean; message: string } | null>(null)
+  const [ingestRates, setIngestRates] = useState<Record<number, IngestRateBucket[]>>({})
 
   const authHeader = () => ({ Authorization: `Bearer ${getToken() ?? ''}`, 'Content-Type': 'application/json' })
 
@@ -399,8 +400,16 @@ export default function Collectors() {
     try {
       const res = await fetch('/api/snmp/collectors', { headers: authHeader() })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = await res.json()
+      const data: Collector[] = await res.json()
       setCollectors(Array.isArray(data) ? data : [])
+      // Load ingest-rate sparklines for each collector
+      const rates: Record<number, IngestRateBucket[]> = {}
+      await Promise.all(
+        (Array.isArray(data) ? data : []).map(async (c) => {
+          try { rates[c.id] = await api.getCollectorIngestRate(c.id, 1, 5) } catch {}
+        })
+      )
+      setIngestRates(rates)
     } catch (e: any) { setError(e.message) } finally { setLoading(false) }
   }
   useEffect(() => { void load() }, [])
@@ -548,6 +557,27 @@ export default function Collectors() {
                   <td className="px-5 py-3">
                     <p className="text-white font-medium text-sm">{c.name}</p>
                     {c.description && <p className="text-xs text-gray-500">{c.description}</p>}
+                    {/* Ingest-rate mini sparkline (last 1h, 5-min buckets) */}
+                    {ingestRates[c.id] && ingestRates[c.id].length > 0 && (() => {
+                      const buckets = ingestRates[c.id]
+                      const maxPoll = Math.max(...buckets.map(b => b.poll_count), 1)
+                      const totalPolls = buckets.reduce((s, b) => s + b.poll_count, 0)
+                      return (
+                        <div className="mt-1.5">
+                          <div className="flex items-end gap-0.5 h-5">
+                            {buckets.map((b, i) => (
+                              <div
+                                key={i}
+                                className="flex-1 rounded-sm bg-blue-500/60 hover:bg-blue-400/80 transition-colors"
+                                style={{ height: `${Math.max((b.poll_count / maxPoll) * 100, 4)}%` }}
+                                title={`${b.bucket_ts}: ${b.poll_count} polls, ${b.active_devices} devices`}
+                              />
+                            ))}
+                          </div>
+                          <p className="text-xs text-gray-600 mt-0.5">{totalPolls} polls/h</p>
+                        </div>
+                      )
+                    })()}
                     <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                       {c.id === 1 && <span className="text-xs text-blue-400 bg-blue-900/30 px-1.5 py-0.5 rounded">built-in</span>}
                       {c.id !== 1 && c.ssh_key_enc &&
