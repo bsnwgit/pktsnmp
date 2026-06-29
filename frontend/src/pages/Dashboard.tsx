@@ -80,6 +80,7 @@ function OrgNode({
   node: OrgTreeNode; signal: CollapseSignal; onNavigate: (n: DeviceTreeNode) => void
 }) {
   const [expanded, setExpanded] = useCollapseSync(signal)
+  const st = subtreeStatus(node.children)
   return (
     <div>
       <div
@@ -87,6 +88,12 @@ function OrgNode({
         onClick={() => setExpanded(x => !x)}
       >
         <span className="text-xs text-gray-400 w-4 flex-shrink-0">{expanded ? '▾' : '▸'}</span>
+        <span className="relative flex-shrink-0">
+          <span className={`w-2.5 h-2.5 rounded-full block ${subtreeDotColor(st)}`} />
+          {(st === 'down' || st === 'alerts') && (
+            <span className={`absolute inset-0 rounded-full animate-ping opacity-60 ${st === 'down' ? 'bg-red-500' : 'bg-yellow-400'}`} />
+          )}
+        </span>
         <span className="text-sm font-bold text-white tracking-wide">{node.name}</span>
         <span className="text-xs text-gray-500 ml-1">org</span>
         <div className="flex-1" />
@@ -110,6 +117,7 @@ function GroupNode({
   node: GroupTreeNode; signal: CollapseSignal; onNavigate: (n: DeviceTreeNode) => void
 }) {
   const [expanded, setExpanded] = useCollapseSync(signal)
+  const st = subtreeStatus(node.children)
   return (
     <div>
       <div
@@ -117,6 +125,12 @@ function GroupNode({
         onClick={() => setExpanded(x => !x)}
       >
         <span className="text-xs text-gray-500 w-4 flex-shrink-0">{expanded ? '▾' : '▸'}</span>
+        <span className="relative flex-shrink-0">
+          <span className={`w-2 h-2 rounded-full block ${subtreeDotColor(st)}`} />
+          {(st === 'down' || st === 'alerts') && (
+            <span className={`absolute inset-0 rounded-full animate-ping opacity-60 ${st === 'down' ? 'bg-red-500' : 'bg-yellow-400'}`} />
+          )}
+        </span>
         <span className="text-sm font-semibold text-gray-200">{node.name}</span>
         <span className="text-xs text-gray-600 ml-1">group</span>
         <div className="flex-1" />
@@ -140,6 +154,7 @@ function SiteNode({
   node: SiteTreeNode; signal: CollapseSignal; onNavigate: (n: DeviceTreeNode) => void
 }) {
   const [expanded, setExpanded] = useCollapseSync(signal)
+  const st = subtreeStatus(node.children)
   return (
     <div>
       <div
@@ -147,6 +162,12 @@ function SiteNode({
         onClick={() => setExpanded(x => !x)}
       >
         <span className="text-xs text-gray-600 w-4 flex-shrink-0">{expanded ? '▾' : '▸'}</span>
+        <span className="relative flex-shrink-0">
+          <span className={`w-2 h-2 rounded-full block ${subtreeDotColor(st)}`} />
+          {(st === 'down' || st === 'alerts') && (
+            <span className={`absolute inset-0 rounded-full animate-ping opacity-60 ${st === 'down' ? 'bg-red-500' : 'bg-yellow-400'}`} />
+          )}
+        </span>
         <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">{node.name}</span>
         <span className="text-xs text-gray-700 ml-1">site</span>
         <div className="flex-1" />
@@ -178,6 +199,39 @@ function dotColor(node: DeviceTreeNode): string {
 
 function dotPulse(node: DeviceTreeNode): boolean {
   return node.enabled && (node.status === 'down' || node.subtree_alerts > 0)
+}
+
+// ── Subtree status helpers ─────────────────────────────────────────────────────
+
+type SubtreeStatus = 'down' | 'alerts' | 'up' | 'unknown'
+
+function subtreeStatus(nodes: EnvironmentNode[]): SubtreeStatus {
+  let best: SubtreeStatus = 'unknown'
+  for (const n of nodes) {
+    if (n.type === 'device') {
+      if (!n.enabled) continue
+      if (n.status === 'down') return 'down'
+      if (n.subtree_alerts > 0) best = 'alerts'
+      else if (n.status === 'up' && best === 'unknown') best = 'up'
+    } else {
+      const cs = subtreeStatus(n.children)
+      if (cs === 'down') return 'down'
+      if (cs === 'alerts') best = 'alerts'
+      else if (cs === 'up' && best === 'unknown') best = 'up'
+    }
+  }
+  return best
+}
+
+function subtreeDotColor(st: SubtreeStatus): string {
+  if (st === 'down')   return 'bg-red-500'
+  if (st === 'alerts') return 'bg-yellow-400'
+  if (st === 'up')     return 'bg-green-500'
+  return 'bg-gray-600'
+}
+
+function subtreeDotPulse(st: SubtreeStatus): boolean {
+  return st === 'down' || st === 'alerts'
 }
 
 function DeviceNode({
@@ -319,16 +373,16 @@ function EnvironmentTree({ nodes, loading }: { nodes: EnvironmentNode[]; loading
   const expandAll   = () => setSignal(s => ({ expanded: true,  seq: s.seq + 1 }))
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+    <div className={`bg-gray-900 rounded-xl overflow-hidden border ${totalAlerting > 0 ? 'border-red-500' : 'border-gray-800'}`}>
       {/* Header */}
-      <div className="px-5 py-3 border-b border-gray-800 flex items-center justify-between">
+      <div className={`px-5 py-3 border-b flex items-center justify-between ${totalAlerting > 0 ? 'border-red-500/60 bg-red-500/5' : 'border-gray-800'}`}>
         <div className="flex items-center gap-3">
           <p className="text-sm font-medium text-white">Environment</p>
           {!loading && (
             <span className="text-xs text-gray-500">{totalDevices} device{totalDevices !== 1 ? 's' : ''}</span>
           )}
           {totalAlerting > 0 && (
-            <span className="text-xs font-medium text-red-400">{totalAlerting} alerting</span>
+            <span className="text-xs font-bold text-red-400">{totalAlerting} alerting</span>
           )}
         </div>
         <div className="flex items-center gap-3">
