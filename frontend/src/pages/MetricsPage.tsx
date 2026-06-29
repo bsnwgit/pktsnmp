@@ -59,14 +59,14 @@ const STATUS_RING: Record<string, string> = {
 const OID_GROUPS = {
   traffic: {
     label: 'Traffic',
-    oids:  ['ifInOctets', 'ifOutOctets'] as const,
+    oids:  ['ifHCInOctets', 'ifHCOutOctets'] as const,
     color: ['#3b82f6', '#8b5cf6'],
     unit:  'bps',
     isRate: true,
   },
   packets: {
     label: 'Packets',
-    oids:  ['ifInUcastPkts', 'ifOutUcastPkts'] as const,
+    oids:  ['ifHCInUcastPkts', 'ifHCOutUcastPkts'] as const,
     color: ['#06b6d4', '#f59e0b'],
     unit:  'pkt/s',
     isRate: true,
@@ -828,7 +828,7 @@ export default function MetricsPage() {
 
             {/* Metric sections — always rendered, show empty state if no data */}
             <ChartSection
-              title="Traffic (bits/sec)"
+              title="Traffic (bits/sec, 64-bit counters)"
               data={chartData.traffic}
               oids={OID_GROUPS.traffic.oids}
               colors={OID_GROUPS.traffic.color}
@@ -836,7 +836,7 @@ export default function MetricsPage() {
               alertEvents={history?.alert_events}
             />
             <ChartSection
-              title="Packets (per sec)"
+              title="Packets (per sec, 64-bit counters)"
               data={chartData.packets}
               oids={OID_GROUPS.packets.oids}
               colors={OID_GROUPS.packets.color}

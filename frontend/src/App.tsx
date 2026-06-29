@@ -24,6 +24,14 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <Layout>{children}</Layout>
 }
 
+function AdminRoute({ children }: { children: React.ReactNode }) {
+  const { user, isLoading } = useAuth()
+  if (isLoading) return <PageFallback />
+  if (!user) return <Navigate to="/login" replace />
+  if (user.role !== 'admin') return <Navigate to="/" replace />
+  return <Layout>{children}</Layout>
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -47,9 +55,9 @@ export default function App() {
             </ProtectedRoute>
           } />
           <Route path="/settings" element={
-            <ProtectedRoute>
+            <AdminRoute>
               <Suspense fallback={<PageFallback />}><Settings /></Suspense>
-            </ProtectedRoute>
+            </AdminRoute>
           } />
           <Route path="/collectors" element={
             <ProtectedRoute>

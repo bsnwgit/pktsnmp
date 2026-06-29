@@ -130,7 +130,7 @@ async def _ensure_defaults(db: aiosqlite.Connection) -> None:
 
 
 @router.get("/")
-async def get_all_settings(_: CurrentUser, db: aiosqlite.Connection = Depends(get_db)):
+async def get_all_settings(_: AdminUser, db: aiosqlite.Connection = Depends(get_db)):
     """Return all settings as a flat dict. Sensitive values are masked."""
     await _ensure_defaults(db)
     async with db.execute("SELECT key, value FROM settings") as cur:
@@ -147,7 +147,7 @@ async def get_all_settings(_: CurrentUser, db: aiosqlite.Connection = Depends(ge
 
 
 @router.get("/{key}")
-async def get_setting(key: str, _: CurrentUser, db: aiosqlite.Connection = Depends(get_db)):
+async def get_setting(key: str, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)):
     async with db.execute("SELECT value FROM settings WHERE key = ?", (key,)) as cur:
         row = await cur.fetchone()
     if not row:
