@@ -31,6 +31,7 @@ async def list_events(
     _: CurrentUser,
     db: aiosqlite.Connection = Depends(get_db),
     acked: Optional[bool] = Query(None, description="Filter by acked status"),
+    active: Optional[bool] = Query(None, description="If true, only unresolved events"),
     limit: int = Query(200, ge=1, le=2000),
     since: Optional[str] = Query(None, description="ISO datetime lower bound"),
 ) -> list[dict]:
@@ -40,6 +41,8 @@ async def list_events(
 
     if acked is not None:
         clauses.append("e.acked_at IS " + ("NOT NULL" if acked else "NULL"))
+    if active is True:
+        clauses.append("e.resolved_at IS NULL")
     if since:
         clauses.append("e.fired_at >= ?")
         params.append(since)
@@ -50,14 +53,18 @@ async def list_events(
     sql = f"""
         SELECT
             e.id, e.severity, e.message, e.details,
-            e.fired_at, e.acked_at,
+            e.fired_at, e.acked_at, e.resolved_at,
+            e.device_id,
             r.id   AS rule_id,
             r.name AS rule_name,
             r.rule_type,
-            u.username AS acked_by
+            u.username AS acked_by,
+            d.name AS device_name,
+            d.ip   AS device_ip
         FROM alert_events e
         JOIN  alert_rules r ON r.id = e.rule_id
         LEFT JOIN users   u ON u.id = e.acked_by
+        LEFT JOIN devices d ON d.id = e.device_id
         {where}
         ORDER BY e.fired_at DESC
         LIMIT ?
