@@ -48,7 +48,14 @@ async def init_db() -> None:
 
             if not already_applied:
                 sql = mfile.read_text()
-                await conn.executescript(sql)
+                try:
+                    await conn.executescript(sql)
+                except Exception as exc:
+                    # ALTER TABLE ADD COLUMN fails if the column already exists
+                    # (e.g. if a prior deploy ran the DDL outside the migration
+                    # tracker). Treat "duplicate column name" as already applied.
+                    if "duplicate column name" not in str(exc).lower():
+                        raise
                 await conn.execute(
                     "INSERT INTO _migrations (filename) VALUES (?)", (mfile.name,)
                 )
