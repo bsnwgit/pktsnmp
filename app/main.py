@@ -185,6 +185,15 @@ if __name__ == "__main__":
         log_level=settings.log_level.lower(),
         workers=1,
     )
+    # Fall back to the well-known upload paths if DB paths are empty
+    _SSL_DIR   = Path(__file__).parent.parent / "ssl"
+    _CERT_FILE = _SSL_DIR / "server.crt"
+    _KEY_FILE  = _SSL_DIR / "server.key"
+    if not _ssl_certfile and _CERT_FILE.exists():
+        _ssl_certfile = str(_CERT_FILE)
+    if not _ssl_keyfile and _KEY_FILE.exists():
+        _ssl_keyfile = str(_KEY_FILE)
+
     if _ssl_enabled and _ssl_certfile and _ssl_keyfile:
         _uvicorn_kwargs["ssl_certfile"] = _ssl_certfile
         _uvicorn_kwargs["ssl_keyfile"]  = _ssl_keyfile

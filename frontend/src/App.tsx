@@ -11,6 +11,7 @@ const Settings    = lazy(() => import('./pages/Settings'))
 const Collectors  = lazy(() => import('./pages/Collectors'))
 const OidCatalog  = lazy(() => import('./pages/OidCatalog'))
 const Devices     = lazy(() => import('./pages/Devices'))
+const MetricsPage = lazy(() => import('./pages/MetricsPage'))
 
 function PageFallback() {
   return <div className="flex items-center justify-center h-48 text-white">Loading…</div>
@@ -20,6 +21,14 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth()
   if (isLoading) return <PageFallback />
   if (!user) return <Navigate to="/login" replace />
+  return <Layout>{children}</Layout>
+}
+
+function AdminRoute({ children }: { children: React.ReactNode }) {
+  const { user, isLoading } = useAuth()
+  if (isLoading) return <PageFallback />
+  if (!user) return <Navigate to="/login" replace />
+  if (user.role !== 'admin') return <Navigate to="/" replace />
   return <Layout>{children}</Layout>
 }
 
@@ -46,9 +55,9 @@ export default function App() {
             </ProtectedRoute>
           } />
           <Route path="/settings" element={
-            <ProtectedRoute>
+            <AdminRoute>
               <Suspense fallback={<PageFallback />}><Settings /></Suspense>
-            </ProtectedRoute>
+            </AdminRoute>
           } />
           <Route path="/collectors" element={
             <ProtectedRoute>
@@ -63,6 +72,11 @@ export default function App() {
           <Route path="/devices" element={
             <ProtectedRoute>
               <Suspense fallback={<PageFallback />}><Devices /></Suspense>
+            </ProtectedRoute>
+          } />
+          <Route path="/metrics" element={
+            <ProtectedRoute>
+              <Suspense fallback={<PageFallback />}><MetricsPage /></Suspense>
             </ProtectedRoute>
           } />
           <Route path="/users" element={<Navigate to="/settings" replace />} />

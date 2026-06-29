@@ -5,7 +5,7 @@
  * All users can view collector status and sync state.
  */
 import { useEffect, useRef, useState } from 'react'
-import { getToken } from '../api/client'
+import { getToken, api, IngestRateBucket } from '../api/client'
 
 interface Collector {
   id: number
@@ -29,6 +29,10 @@ interface Collector {
   sync_status: string | null       // 'synced' | 'error' | 'unknown' | null
   last_synced_at: string | null
   last_sync_error: string | null
+  // Health / 3-state status (derived server-side)
+  effective_status: string          // 'online' | 'offline' | 'error'
+  auth_failure_count: number
+  last_auth_failure_at: string | null
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -44,7 +48,10 @@ const fmtRelative = (ts: string | null) => {
 }
 
 const statusDot = (s: string) =>
-  s === 'online' ? 'bg-green-400' : s === 'offline' ? 'bg-red-400' : 'bg-gray-500'
+  s === 'online' ? 'bg-green-400' : s === 'error' ? 'bg-amber-400' : 'bg-red-400'
+
+const statusText = (s: string) =>
+  s === 'online' ? 'text-green-400' : s === 'error' ? 'text-amber-400' : 'text-red-400'
 
 function SyncBadge({ status, error }: { status: string | null; error: string | null }) {
   if (!status || status === 'unknown') return <span className="text-xs text-gray-600">—</span>
@@ -384,6 +391,7 @@ export default function Collectors() {
   const [preview, setPreview]       = useState<{ id: number; name: string } | null>(null)
   const [syncing, setSyncing]       = useState<number | null>(null)
   const [syncResult, setSyncResult] = useState<{ id: number; ok: boolean; message: string } | null>(null)
+  const [ingestRates, setIngestRates] = useState<Record<number, IngestRateBucket[]>>({})
 
   const authHeader = () => ({ Authorization: `Bearer ${getToken() ?? ''}`, 'Content-Type': 'application/json' })
 
@@ -392,8 +400,16 @@ export default function Collectors() {
     try {
       const res = await fetch('/api/snmp/collectors', { headers: authHeader() })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = await res.json()
+      const data: Collector[] = await res.json()
       setCollectors(Array.isArray(data) ? data : [])
+      // Load ingest-rate sparklines for each collector
+      const rates: Record<number, IngestRateBucket[]> = {}
+      await Promise.all(
+        (Array.isArray(data) ? data : []).map(async (c) => {
+          try { rates[c.id] = await api.getCollectorIngestRate(c.id, 1, 5) } catch {}
+        })
+      )
+      setIngestRates(rates)
     } catch (e: any) { setError(e.message) } finally { setLoading(false) }
   }
   useEffect(() => { void load() }, [])
@@ -443,7 +459,7 @@ export default function Collectors() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto space-y-4">
+    <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <h1 className="text-lg font-semibold text-white">Collectors</h1>
@@ -541,6 +557,27 @@ export default function Collectors() {
                   <td className="px-5 py-3">
                     <p className="text-white font-medium text-sm">{c.name}</p>
                     {c.description && <p className="text-xs text-gray-500">{c.description}</p>}
+                    {/* Ingest-rate mini sparkline (last 1h, 5-min buckets) */}
+                    {ingestRates[c.id] && ingestRates[c.id].length > 0 && (() => {
+                      const buckets = ingestRates[c.id]
+                      const maxPoll = Math.max(...buckets.map(b => b.poll_count), 1)
+                      const totalPolls = buckets.reduce((s, b) => s + b.poll_count, 0)
+                      return (
+                        <div className="mt-1.5">
+                          <div className="flex items-end gap-0.5 h-5">
+                            {buckets.map((b, i) => (
+                              <div
+                                key={i}
+                                className="flex-1 rounded-sm bg-blue-500/60 hover:bg-blue-400/80 transition-colors"
+                                style={{ height: `${Math.max((b.poll_count / maxPoll) * 100, 4)}%` }}
+                                title={`${b.bucket_ts}: ${b.poll_count} polls, ${b.active_devices} devices`}
+                              />
+                            ))}
+                          </div>
+                          <p className="text-xs text-gray-600 mt-0.5">{totalPolls} polls/h</p>
+                        </div>
+                      )
+                    })()}
                     <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                       {c.id === 1 && <span className="text-xs text-blue-400 bg-blue-900/30 px-1.5 py-0.5 rounded">built-in</span>}
                       {c.id !== 1 && c.ssh_key_enc &&
@@ -553,10 +590,23 @@ export default function Collectors() {
                   </td>
                   <td className="px-5 py-3 font-mono text-gray-300 text-xs hidden sm:table-cell">{c.ip ?? '—'}</td>
                   <td className="px-5 py-3">
-                    <span className="flex items-center gap-1.5 text-xs">
-                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${statusDot(c.status)}`}></span>
-                      <span className="text-gray-300 capitalize">{c.status}</span>
-                    </span>
+                    <div className="text-xs">
+                      <span className="flex items-center gap-1.5">
+                        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${statusDot(c.effective_status)}`}></span>
+                        <span className={`capitalize ${statusText(c.effective_status)}`}>{c.effective_status}</span>
+                      </span>
+                      {c.effective_status === 'error' && c.auth_failure_count > 0 && (
+                        <p className="text-amber-600 mt-0.5 ml-3.5"
+                           title={c.last_auth_failure_at ? `Last at: ${c.last_auth_failure_at}` : ''}>
+                          Auth failures: {c.auth_failure_count}
+                        </p>
+                      )}
+                      {c.effective_status === 'offline' && (
+                        <p className="text-gray-600 mt-0.5 ml-3.5">
+                          {c.last_seen ? `Last: ${fmtRelative(c.last_seen)}` : 'Never connected'}
+                        </p>
+                      )}
+                    </div>
                   </td>
                   <td className="px-5 py-3 hidden md:table-cell">
                     <div>
