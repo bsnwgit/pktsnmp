@@ -84,6 +84,16 @@ def parse_otlp_metrics(body: dict, collector_id: int) -> list[dict]:
                             elif "boolValue" in v_obj:
                                 attributes[k] = v_obj["boolValue"]
 
+                        # Extract interface label from otelcol column_oids attributes.
+                        # IF-MIB metrics attach ifDescr/ifName; PAN-OS panIfStats
+                        # metrics attach panIfStatsIfname instead.
+                        iface_label: str | None = (
+                            attributes.get("ifDescr")
+                            or attributes.get("ifName")
+                            or attributes.get("panIfStatsIfname")
+                            or None
+                        )
+
                         results.append(
                             {
                                 "collector_id": collector_id,
@@ -94,6 +104,7 @@ def parse_otlp_metrics(body: dict, collector_id: int) -> list[dict]:
                                 "value_type": value_type,
                                 "timestamp": timestamp,
                                 "attributes": attributes,
+                                "interface_label": iface_label,
                             }
                         )
     except Exception as e:
