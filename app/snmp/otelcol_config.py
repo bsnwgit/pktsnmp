@@ -204,21 +204,21 @@ def _cisco_scalar_metrics(label: str) -> dict:
 
 
 def _metrics_for_label(label: str, device_type: str | None = None) -> dict:
-    """Return the IF-MIB metric set for the primary receiver block.
+    """Return the full metrics dict for a device, with vendor-specific extras.
 
-    All devices get 12 standard IF-MIB metrics + 4 HC 64-bit counters.
-    Switches/routers also get 6 Cisco CPU/memory scalars.
-
-    NOTE: PAN-OS metrics are intentionally EXCLUDED here. They live in a
-    separate receiver built by build_pan_receiver_block() so that a PAN-OS
-    SNMP timeout cannot block the standard IF-MIB polling.
+    All devices get the 12 standard IF-MIB metrics + 4 HC 64-bit counters.
+    Firewalls (PAN-OS) get panIfStats per-interface table + 10 scalar OIDs.
+    Switches/routers (Cisco) get 6 Cisco CPU/memory scalars.
     """
     metrics: dict = {}
     metrics.update(_if_mib_metrics(label))
     metrics.update(_if_hc_metrics(label))
 
     dt = (device_type or "").lower()
-    if dt in ("switch", "router"):
+    if dt == "firewall":
+        metrics.update(_pan_if_metrics(label))
+        metrics.update(_pan_scalar_metrics(label))
+    elif dt in ("switch", "router"):
         metrics.update(_cisco_scalar_metrics(label))
 
     return metrics
@@ -253,11 +253,43 @@ def _otelcol_auth_type(proto: str | None) -> str:
 
 # ── Public: receiver block builder ────────────────────────────────────────────
 
-def _build_snmp_auth(block: dict, cred: dict, version: str) -> None:
-    """Attach authentication fields to a receiver block in-place."""
-    if version in ("v2c", "v1"):
+def build_receiver_block(device: dict, credential: dict | None) -> dict:
+    """
+    Build a single otelcol SNMP receiver block dict for *device*.
+
+    *device*     — row from the devices table (must include otelcol_label, ip,
+                   poll_interval_override, device_type).
+    *credential* — row from snmp_credentials (or None for default v2c public).
+                   Secret key values must already be decrypted (plain text).
+    """
+    label = device.get("otelcol_label") or device.get("name", "unknown")
+    device_type = (device.get("device_type") or "").lower()
+
+    cred = credential or {}
+    version = cred.get("snmp_version") or "v2c"
+
+    interval_s = device.get("poll_interval_override") or 60
+    interval = f"{interval_s}s"
+
+    ip = device.get("ip", "")
+
+    # Build attributes dict — always include IF-MIB attrs; add PAN attrs for firewalls
+    attributes: dict = dict(_IF_ATTRIBUTES)
+    if device_type == "firewall":
+        attributes.update(_PAN_ATTRIBUTES)
+
+    block: dict[str, Any] = {
+        "attributes":           attributes,
+        "collection_interval":  interval,
+        "endpoint":             f"udp://{ip}:161",
+        "metrics":              _metrics_for_label(label, device_type),
+        "version":              version,
+    }
+
+    if version == "v2c" or version == "v1":
         block["community"] = cred.get("community") or "public"
     else:
+        # v3
         block["user"]           = cred.get("security_name") or ""
         block["security_level"] = _otelcol_security_level(cred.get("security_level"))
         auth_key = cred.get("auth_key") or ""
@@ -267,74 +299,14 @@ def _build_snmp_auth(block: dict, cred: dict, version: str) -> None:
         priv_key = cred.get("priv_key") or ""
         if priv_key:
             block["priv_password"] = priv_key
-            block["priv_type"]     = "AES128"
+            block["priv_type"]     = "AES128"   # default; can be extended
 
-
-def build_receiver_block(device: dict, credential: dict | None) -> dict:
-    """Build the primary IF-MIB otelcol SNMP receiver block for *device*.
-
-    Uses only _IF_ATTRIBUTES so that a PAN-OS SNMP timeout cannot block
-    the standard interface polling. PAN-OS metrics have their own separate
-    receiver built by build_pan_receiver_block().
-    """
-    label     = device.get("otelcol_label") or device.get("name", "unknown")
-    device_type = (device.get("device_type") or "").lower()
-    cred      = credential or {}
-    version   = cred.get("snmp_version") or "v2c"
-    interval  = f"{device.get('poll_interval_override') or 60}s"
-    ip        = device.get("ip", "")
-
-    block: dict[str, Any] = {
-        "attributes":          dict(_IF_ATTRIBUTES),   # IF-MIB attrs only
-        "collection_interval": interval,
-        "endpoint":            f"udp://{ip}:161",
-        "metrics":             _metrics_for_label(label, device_type),
-        "version":             version,
-    }
-    _build_snmp_auth(block, cred, version)
-    return block
-
-
-def build_pan_receiver_block(device: dict, credential: dict | None) -> dict:
-    """Build a PAN-OS-only receiver for firewall devices.
-
-    Isolated from the IF-MIB receiver so that panIfStatsTable walk
-    failures/timeouts cannot block standard interface polling.
-
-    The attributes section contains only panIfStatsIfname so otelcol
-    uses it to tag per-interface counters from panIfStatsTable.
-    The scalar PAN-OS OIDs (CPU, sessions, memory) are polled as
-    scalar_oids — they don't depend on the attribute walk.
-    """
-    label    = device.get("otelcol_label") or device.get("name", "unknown")
-    cred     = credential or {}
-    version  = cred.get("snmp_version") or "v2c"
-    interval = f"{device.get('poll_interval_override') or 60}s"
-    ip       = device.get("ip", "")
-
-    metrics: dict = {}
-    metrics.update(_pan_if_metrics(label))
-    metrics.update(_pan_scalar_metrics(label))
-
-    block: dict[str, Any] = {
-        "attributes":          dict(_PAN_ATTRIBUTES),  # only panIfStatsIfname
-        "collection_interval": interval,
-        "endpoint":            f"udp://{ip}:161",
-        "metrics":             metrics,
-        "version":             version,
-    }
-    _build_snmp_auth(block, cred, version)
     return block
 
 
 def receiver_name(otelcol_label: str) -> str:
     """Return the otelcol receiver key for a device label, e.g. 'SiteA/FW3' → 'snmp/SiteA/fw3'."""
     return "snmp/" + otelcol_label.lower()
-
-
-def receiver_name_pan(otelcol_label: str) -> str:
-    """Return the PAN-OS receiver key, e.g. 'AWS/AZ2A' → 'snmp/aws/az2a/pan'."""
-    return "snmp/" + otelcol_label.lower() + "/pan"
 
 
 # ── Public: full config patcher ───────────────────────────────────────────────
@@ -380,16 +352,10 @@ def patch_config(
         label = dev.get("otelcol_label")
         if not label:
             continue
-        device_type = (dev.get("device_type") or "").lower()
         rname = receiver_name(label)
         cfg["receivers"][rname] = build_receiver_block(dev, dev)
         pipeline = dev.get("otelcol_pipeline") or "metrics/snmp"
         pipeline_map.setdefault(pipeline, []).append(rname)
-        if device_type == "firewall":
-            # Add isolated PAN-OS receiver so its walk cannot block IF-MIB polling
-            pan_rname = receiver_name_pan(label)
-            cfg["receivers"][pan_rname] = build_pan_receiver_block(dev, dev)
-            pipeline_map.setdefault(pipeline, []).append(pan_rname)
 
     # ── 4. Patch pipelines ────────────────────────────────────────────────────
     pipelines = cfg["service"]["pipelines"]
