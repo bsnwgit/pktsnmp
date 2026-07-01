@@ -54,10 +54,7 @@ async def list_events(
         SELECT
             e.id, e.severity, e.message, e.details,
             e.fired_at, e.acked_at, e.resolved_at,
-<<<<<<< HEAD
-=======
             e.device_id,
->>>>>>> d1f8493 (feat: real alert engine with device status sync and ingest fixes)
             r.id   AS rule_id,
             r.name AS rule_name,
             r.rule_type,
@@ -74,15 +71,7 @@ async def list_events(
     """
     async with db.execute(sql, params) as cur:
         rows = await cur.fetchall()
-    result = []
-    for r in rows:
-        d = dict(r)
-        try:
-            d["details"] = json.loads(d["details"])
-        except Exception:
-            d["details"] = {}
-        result.append(d)
-    return result
+    return [dict(r) for r in rows]
 
 
 @router.post("/events/{event_id}/ack")

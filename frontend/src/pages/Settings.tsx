@@ -385,6 +385,100 @@ const TABS: Array<{ id: TabId; label: string; adminOnly?: boolean }> = [
   { id: 'users',         label: 'Users', adminOnly: true },
 ]
 
+
+// ── pktHub Integration component ─────────────────────────────────────────────
+function PktHubTokenDisplay() {
+  const [token, setToken]           = useState('')
+  const [revealed, setRevealed]     = useState(false)
+  const [copied, setCopied]         = useState(false)
+  const [loaded, setLoaded]         = useState(false)
+  const [regenerating, setRegen]    = useState(false)
+
+  const regenerate = async () => {
+    if (!confirm('Generate a new token?\n\nThe current token will stop working immediately.\nYou will need to re-register this app in pktHub with the new token.')) return
+    setRegen(true)
+    try {
+      const r = await fetch('/api/suite/token/regenerate', { method: 'POST', credentials: 'include' })
+      const d = await r.json()
+      if (d.suite_token) { setToken(d.suite_token); setRevealed(true) }
+    } catch {}
+    setRegen(false)
+  }
+
+  useEffect(() => {
+    fetch('/api/suite/token', { credentials: 'include' })
+      .then(r => r.json())
+      .then(d => { setToken(d.suite_token || ''); setLoaded(true) })
+      .catch(() => setLoaded(true))
+  }, [])
+
+  const masked = token
+    ? token.slice(0, 6) + '\u2022'.repeat(28) + token.slice(-4)
+    : ''
+
+  return (
+    <>
+      <div className="grid grid-cols-3 gap-4 items-start py-3 border-b border-gray-800">
+        <div>
+          <p className="text-sm font-medium text-white">Suite Token</p>
+          <p className="text-xs text-gray-500 mt-0.5">Copy to pktHub when registering this app</p>
+        </div>
+        <div className="col-span-2">
+          {!loaded && <p className="text-xs text-gray-500 animate-pulse">Loading…</p>}
+          {loaded && !token && (
+            <p className="text-xs text-yellow-400">No token set — visit this page again after restarting the service.</p>
+          )}
+          {loaded && token && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <code className="flex-1 min-w-0 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-xs font-mono text-gray-200 break-all">
+                {revealed ? token : masked}
+              </code>
+              <button
+                onClick={() => setRevealed(v => !v)}
+                className="px-2 py-1.5 text-xs text-gray-400 hover:text-white border border-gray-700 rounded-lg bg-gray-800 whitespace-nowrap"
+              >
+                {revealed ? 'Hide' : 'Reveal'}
+              </button>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(token)
+                  setCopied(true)
+                  setTimeout(() => setCopied(false), 2000)
+                }}
+                className="px-3 py-1.5 text-xs font-medium text-white rounded-lg whitespace-nowrap transition-colors"
+                style={{ background: copied ? '#16a34a' : '#2563eb' }}
+              >
+                {copied ? '\u2713 Copied' : 'Copy Token'}
+              </button>
+              <button
+                onClick={regenerate}
+                disabled={regenerating}
+                title="Generate a new token — you must re-register in pktHub after"
+                className="px-2 py-1.5 text-xs font-medium text-red-400 hover:text-red-300 border border-red-800/60 hover:border-red-600 rounded-lg whitespace-nowrap disabled:opacity-40 transition-colors"
+              >
+                {regenerating ? '\u2026' : 'Regen'}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-4 items-start py-3">
+        <div>
+          <p className="text-sm font-medium text-white">How to register</p>
+        </div>
+        <div className="col-span-2 space-y-1 text-xs text-gray-400">
+          <p>1. Copy the token above.</p>
+          <p>2. In pktHub &#8594; App Manager &#8594; Register App, enter this app&#39;s URL and paste the token.</p>
+          <p>3. pktHub will open this app through its proxy with users automatically signed in.</p>
+          <p className="text-gray-500 mt-2 text-xs">&#9888; The token is permanent — it does <em>not</em> change on restart. Use <strong className="text-gray-400">Regenerate</strong> to revoke current access and issue a new token (re-register in pktHub afterwards).</p>
+        </div>
+      </div>
+    </>
+  )
+}
+// ── End pktHub Integration ────────────────────────────────────────────────────
+
+
 export default function Settings() {
   const { user: me }          = useAuth()
   const isAdmin               = me?.role === 'admin'
@@ -1019,6 +1113,12 @@ export default function Settings() {
           <div className="py-3">
             <SslPanel sslEnabled={bool('ssl_enabled')} onToggleSSL={v => { set('ssl_enabled', v); api.bulkUpdateSettings({ ssl_enabled: v }).catch(() => {}) }} />
           </div>
+
+          {/* pktHub Integration */}
+          <div className="pt-4 pb-1">
+            <p className="text-xs font-semibold text-white uppercase tracking-wider">pktHub Integration</p>
+          </div>
+          <PktHubTokenDisplay />
         </Section>
       )}
     </div>

@@ -18,9 +18,14 @@ CREATE TABLE IF NOT EXISTS collectors (
     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Seed the built-in local collector (always id=1)
 INSERT OR IGNORE INTO collectors (id, name, description, ip)
-VALUES (1, 'local', 'Built-in local collector (in-process on this server)', '127.0.0.1');
+VALUES (1, 'local', 'Built-in local collector (in-process on O2)', '203.0.113.10');
+
+INSERT OR IGNORE INTO collectors (id, name, description, ip)
+VALUES (2, 'medical', 'Medical otelcol collector', '203.0.113.11');
+
+INSERT OR IGNORE INTO collectors (id, name, description, ip)
+VALUES (3, 'dental', 'Dental otelcol collector', '203.0.113.12');
 
 -- Expand devices table (ALTER TABLE — each column added individually)
 ALTER TABLE devices ADD COLUMN collector_id INTEGER REFERENCES collectors(id) DEFAULT 1;
@@ -36,7 +41,21 @@ ALTER TABLE devices ADD COLUMN auth_key_enc TEXT;
 ALTER TABLE devices ADD COLUMN priv_protocol TEXT NOT NULL DEFAULT 'AES128';
 ALTER TABLE devices ADD COLUMN priv_key_enc TEXT;
 
--- No devices seeded by migration — add devices via the UI or via your own seed script.
+-- Seed live devices (medical collector)
+INSERT OR IGNORE INTO devices (name, ip, site, snmp_version, community, collector_id, otelcol_label, enabled)
+VALUES
+  ('SiteA SW1',     '203.0.113.20',   'medical', 'v3',  '',                 2, 'SiteA/SW1',      1),
+  ('SiteA FW3',     '203.0.113.22',  'medical', 'v2c', 'REDACTED_COMMUNITY_STRING', 2, 'SiteA/FW3',      1),
+  ('SiteA FW4',     '203.0.113.21',  'medical', 'v2c', 'REDACTED_COMMUNITY_STRING', 2, 'SiteA/FW4',      1),
+  ('SiteB SW1', '203.0.113.32', 'medical', 'v2c', 'REDACTED_COMMUNITY_STRING', 2, 'ON/SW1',       1),
+  ('SiteB FW1', '203.0.113.30',  'medical', 'v2c', 'REDACTED_COMMUNITY_STRING', 2, 'SiteB/FW1',  1),
+  ('SiteB FW2', '203.0.113.31',  'medical', 'v2c', 'REDACTED_COMMUNITY_STRING', 2, 'SiteB/FW2',  1);
+
+-- Seed live devices (dental collector)
+INSERT OR IGNORE INTO devices (name, ip, site, snmp_version, community, collector_id, otelcol_label, enabled)
+VALUES
+  ('AWS AZ2A', '10.19.56.186', 'dental', 'v2c', 'REDACTED_COMMUNITY_STRING', 3, 'AWS/AZ2A', 1),
+  ('AWS AZ2B', '10.19.81.236', 'dental', 'v2c', 'REDACTED_COMMUNITY_STRING', 3, 'AWS/AZ2B', 1);
 
 -- OID catalog
 CREATE TABLE IF NOT EXISTS oid_catalog (
