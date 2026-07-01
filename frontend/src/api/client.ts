@@ -114,6 +114,9 @@ export const api = {
   // ── System ────────────────────────────────────────────────────────────────
   testStorageConnection: () =>
     request<{ ok: boolean; backend: string; message: string }>('/system/test-connection', { method: 'POST' }),
+  getSuiteToken: () =>
+    request<{ suite_token: string; has_token: boolean }>('/suite/token'),
+
   restartService: () =>
     request<{ status: string; message: string }>('/system/restart', { method: 'POST' }),
   runCleanup: () =>

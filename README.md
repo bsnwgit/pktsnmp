@@ -456,6 +456,20 @@ Switch backends in **Settings → Storage**.
 
 ## Backup & Restore
 
+### Local project backup (Claude sessions)
+
+A local backup script keeps dated .zip copies of the project source between sessions.
+
+**Script:** `C:\Users\robert.barnett\My Drive\Documents\Claude\Projects\pktSNMP\backup.py`
+**Backup location:** `C:\Users\robert.barnett\My Drive\Backups\pktSNMP\` (dated .zip files)
+
+Run via Desktop Commander:
+```
+C:\Users\robert.barnett\AppData\Local\Programs\Python\Python313\python.exe "C:\Users\robert.barnett\My Drive\Documents\Claude\Projects\pktSNMP\backup.py"
+```
+
+---
+
 ### Automated backup
 
 Configure schedule and retention in **Settings → Backup**, or trigger immediately via the UI or:

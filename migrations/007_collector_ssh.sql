@@ -31,7 +31,7 @@ UPDATE devices SET otelcol_pipeline = 'metrics/snmp'     WHERE otelcol_pipeline 
 
 -- Seed SSH config for known collectors (medical and dental)
 UPDATE collectors SET
-    ssh_user = 'ssh-user',
+    ssh_user = 'ec2-user',
     ssh_auth_type = 'key',
     otelcol_config_path = '/mnt/software/otel/config/otelcol-config.yaml',
     otelcol_service = 'otelcol'
