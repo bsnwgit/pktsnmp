@@ -7,7 +7,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -24,6 +24,7 @@ from app.api import (
     users,
     system as system_router,
 )
+from app.api import suite as suite_router
 from app.api import logs as logs_router
 
 settings = get_settings()
@@ -129,6 +130,7 @@ app.include_router(settings_router.router, prefix="/api/settings", tags=["settin
 app.include_router(system_router.router,   prefix="/api/system",   tags=["system"])
 app.include_router(alerts_router.router,   prefix="/api/alerts",   tags=["alerts"])
 app.include_router(logs_router.router,     prefix="/api/logs",     tags=["logs"])
+app.include_router(suite_router.router, prefix="/api/suite", tags=["suite"])
 
 # ── Health check ──────────────────────────────────────────────────────────────
 
@@ -142,14 +144,30 @@ if _frontend_dist.exists():
     app.mount("/assets", StaticFiles(directory=str(_frontend_dist / "assets")), name="assets")
 
     @app.get("/{full_path:path}", include_in_schema=False)
-    async def serve_spa(full_path: str):
+    async def serve_spa(request: Request, full_path: str):
         if full_path.startswith("api/"):
             raise HTTPException(status_code=404, detail="Not found")
         static_file = _frontend_dist / full_path
         if static_file.exists() and static_file.is_file():
             return FileResponse(str(static_file))
         index = _frontend_dist / "index.html"
-        return FileResponse(str(index))
+        response = FileResponse(str(index))
+        # pktHub suite-token bootstrap — set sso cookies so React logs in automatically
+        _cfg = settings
+        _suite_tk = request.headers.get("x-suite-token", "")
+        if _suite_tk and _cfg.suite_token and _suite_tk == _cfg.suite_token:
+            from datetime import datetime, timedelta, timezone
+            from jose import jwt as _jose_jwt
+            from app.dependencies import _SUITE_ROLE_MAP
+            _hub_user = request.headers.get("x-suite-user", "hub_user")
+            _hub_role = request.headers.get("x-suite-role", "viewer")
+            _local_role = _SUITE_ROLE_MAP.get(_hub_role, "viewer")
+            _expire = datetime.now(tz=timezone.utc) + timedelta(hours=8)
+            _payload = {"sub": "0", "role": _local_role, "exp": _expire, "type": "access"}
+            _jwt = _jose_jwt.encode(_payload, _cfg.secret_key, algorithm=_cfg.algorithm)
+            response.set_cookie("sso_access_token", _jwt,       max_age=60, httponly=False, samesite="lax")
+            response.set_cookie("sso_role",         _local_role, max_age=60, httponly=False, samesite="lax")
+        return response
 
 
 # ── Entrypoint (used by systemd: python -m app.main) ─────────────────────────

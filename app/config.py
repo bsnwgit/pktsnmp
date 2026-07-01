@@ -89,6 +89,9 @@ class Settings(BaseSettings):
         default=_yaml_cfg.get("cors_origins", ["*"])
     )
 
+    # ── pktSuite integration ─────────────────────────────────────────────────
+    suite_token: str = Field(default=_yaml_cfg.get("suite_token", ""))
+
     # ── Logging ───────────────────────────────────────────────────────────────
     log_level: str = Field(default=_yaml_cfg.get("log_level", "info"))
     log_file: str = Field(
@@ -99,3 +102,26 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+# suite_token_from_sqlite_patch — reads token from SQLite so /api/suite/register
+# takes effect immediately without service restart.
+_patched_get_settings = get_settings  # noqa: save original if it exists
+
+def get_settings() -> Settings:  # type: ignore[misc]
+    s = Settings()
+    try:
+        import sqlite3 as _sq, json as _j
+        from pathlib import Path as _P
+        _db_path = str(_P(__file__).parent.parent / 'pktsnmp.db')
+        _conn = _sq.connect(_db_path)
+        _row = _conn.execute("SELECT value FROM settings WHERE key='suite_token'").fetchone()
+        _conn.close()
+        if _row and _row[0]:
+            _val = _row[0]
+            _tok = _j.loads(_val) if _val.startswith('"') else _val
+            if _tok:
+                s = s.model_copy(update={'suite_token': _tok})
+    except Exception:
+        pass
+    return s

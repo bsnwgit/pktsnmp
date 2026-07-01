@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>pktSNMP — Technical Overview</title>
+  <style>
+    :root {
+      --bg:         #090e1a;
+      --surface:    #0f1625;
+      --surface2:   #162032;
+      --border:     #1e2e48;
+      --accent:     #00c9a7;
+      --accent2:    #3b82f6;
+      --accent3:    #f59e0b;
+      --text:       #e2e8f0;
+      --muted:      #7c8ea8;
+      --red:        #ef4444;
+      --green:      #22c55e;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+
+    /* ── HERO ─────────────────────────────────────────────── */
+    .hero {
+      position: relative;
+      padding: 72px 48px 64px;
+      overflow: hidden;
+      border-bottom: 1px solid var(--border);
+    }
+    .hero::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 60% 50% at 80% 50%, rgba(0,201,167,.10) 0%, transparent 70%),
+        radial-gradient(ellipse 40% 60% at 10% 80%, rgba(59,130,246,.08) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .hero-inner {
+      max-width: 1100px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 48px;
+    }
+    .hero-text { flex: 1; }
+
+    .logo-wrap { margin-bottom: 28px; display: flex; align-items: center; gap: 16px; }
+    .logo-wrap img { height: 64px; }
+    .badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      background: rgba(0,201,167,.15);
+      color: var(--accent);
+      border: 1px solid rgba(0,201,167,.3);
+    }
+    h1 {
+      font-size: 2.6rem;
+      font-weight: 800;
+      letter-spacing: -.02em;
+      margin-bottom: 12px;
+      line-height: 1.15;
+    }
+    h1 span { color: var(--accent); }
+    .hero-sub {
+      font-size: 1.15rem;
+      color: var(--muted);
+      max-width: 520px;
+      margin-bottom: 32px;
+    }
+    .pill-row { display: flex; flex-wrap: wrap; gap: 10px; }
+    .pill {
+      display: flex; align-items: center; gap: 7px;
+      padding: 7px 14px;
+      border-radius: 6px;
+      font-size: .82rem;
+      font-weight: 600;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+    .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+    .pill .dot.b { background: var(--accent2); }
+    .pill .dot.y { background: var(--accent3); }
+
+    .hero-stats {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      min-width: 200px;
+    }
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      text-align: center;
+    }
+    .stat-num { font-size: 2rem; font-weight: 800; color: var(--accent); }
+    .stat-label { font-size: .78rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-top: 4px; }
+
+    /* ── SECTION LAYOUT ───────────────────────────────────── */
+    .section {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 64px 48px;
+      border-bottom: 1px solid var(--border);
+    }
+    .section:last-child { border-bottom: none; }
+    .section-label {
+      font-size: .72rem;
+      font-weight: 700;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 8px;
+    }
+    h2 {
+      font-size: 1.8rem;
+      font-weight: 800;
+      margin-bottom: 10px;
+      letter-spacing: -.01em;
+    }
+    .section-sub {
+      color: var(--muted);
+      font-size: .95rem;
+      margin-bottom: 40px;
+      max-width: 580px;
+    }
+
+    /* ── DATA FLOW DIAGRAM ────────────────────────────────── */
+    .flow-wrap {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 40px 32px;
+      overflow-x: auto;
+    }
+    .flow-wrap svg { display: block; margin: 0 auto; }
+
+    /* ── FEATURE GRID ─────────────────────────────────────── */
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 20px;
+    }
+    .feat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      transition: border-color .2s;
+    }
+    .feat-card:hover { border-color: rgba(0,201,167,.4); }
+    .feat-icon {
+      font-size: 1.6rem;
+      margin-bottom: 14px;
+      display: block;
+    }
+    .feat-title {
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: var(--text);
+    }
+    .feat-body { font-size: .87rem; color: var(--muted); line-height: 1.6; }
+
+    /* ── TECH STACK TABLE ─────────────────────────────────── */
+    .stack-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: .9rem;
+    }
+    .stack-table th {
+      text-align: left;
+      padding: 10px 16px;
+      background: var(--surface2);
+      color: var(--muted);
+      font-weight: 600;
+      font-size: .75rem;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      border-bottom: 1px solid var(--border);
+    }
+    .stack-table td {
+      padding: 13px 16px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    .stack-table tr:last-child td { border-bottom: none; }
+    .stack-table tr:hover td { background: var(--surface2); }
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: .75rem;
+      font-weight: 600;
+      background: rgba(59,130,246,.15);
+      color: var(--accent2);
+      border: 1px solid rgba(59,130,246,.25);
+      margin-right: 4px;
+    }
+
+    /* ── ALERT RULES ──────────────────────────────────────── */
+    .alert-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 12px;
+    }
+    .alert-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 16px;
+    }
+    .sev { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
+    .sev.crit { background: var(--red); box-shadow: 0 0 6px var(--red); }
+    .sev.warn { background: var(--accent3); box-shadow: 0 0 6px var(--accent3); }
+    .sev.info { background: var(--accent2); box-shadow: 0 0 6px var(--accent2); }
+    .alert-name { font-size: .87rem; font-weight: 600; margin-bottom: 2px; }
+    .alert-desc { font-size: .78rem; color: var(--muted); }
+
+    /* ── PIPELINE STEPS ───────────────────────────────────── */
+    .pipeline {
+      display: flex;
+      align-items: stretch;
+      gap: 0;
+      overflow-x: auto;
+      padding-bottom: 8px;
+    }
+    .pipeline-step {
+      flex: 1;
+      min-width: 150px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 0;
+      padding: 20px 18px;
+      position: relative;
+    }
+    .pipeline-step:first-child { border-radius: 10px 0 0 10px; }
+    .pipeline-step:last-child { border-radius: 0 10px 10px 0; }
+    .pipeline-step + .pipeline-step { border-left: none; }
+    .ps-num {
+      font-size: .7rem;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .ps-title { font-size: .95rem; font-weight: 700; margin-bottom: 6px; }
+    .ps-body { font-size: .78rem; color: var(--muted); line-height: 1.5; }
+    .ps-arrow {
+      display: flex;
+      align-items: center;
+      padding: 0 4px;
+      color: var(--accent);
+      font-size: 1.2rem;
+      flex-shrink: 0;
+    }
+
+    /* ── FOOTER ───────────────────────────────────────────── */
+    footer {
+      padding: 32px 48px;
+      max-width: 1100px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    footer img { height: 28px; opacity: .7; }
+    .footer-meta { font-size: .8rem; color: var(--muted); }
+    .footer-pills { display: flex; gap: 8px; flex-wrap: wrap; }
+    .footer-pill {
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: .75rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════
+     HERO
+═══════════════════════════════════════════════════════ -->
+<section class="hero">
+  <div class="hero-inner">
+    <div class="hero-text">
+      <div class="logo-wrap">
+        <img src="lockup.svg" alt="pktSNMP" onerror="this.style.display='none';document.getElementById('logo-fallback').style.display='flex'" />
+        <div id="logo-fallback" style="display:none;align-items:center;gap:12px">
+          <img src="icon.svg" alt="pkt" width="48" height="48" />
+          <span style="font-size:1.5rem;font-weight:900;letter-spacing:-.03em">pkt<span style="color:var(--accent)">SNMP</span></span>
+        </div>
+        <span class="badge">pktSuite</span>
+      </div>
+      <h1>SNMP Ingest &<br/><span>Visibility Platform</span></h1>
+      <p class="hero-sub">
+        Full-lifecycle SNMP management — collect from any device, store, visualize,
+        and alert. Part of the pktSuite network operations platform.
+      </p>
+      <div class="pill-row">
+        <span class="pill"><span class="dot"></span>Real-Time Polling</span>
+        <span class="pill"><span class="dot b"></span>OTLP Ingest</span>
+        <span class="pill"><span class="dot y"></span>Smart Alerting</span>
+        <span class="pill"><span class="dot"></span>AI Assistant</span>
+        <span class="pill"><span class="dot b"></span>Multi-Collector</span>
+      </div>
+    </div>
+    <div class="hero-stats">
+      <div class="stat-card">
+        <div class="stat-num">12</div>
+        <div class="stat-label">Alert Rule Types</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">576</div>
+        <div class="stat-label">Metrics / OTLP Batch</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">v1/2c/3</div>
+        <div class="stat-label">SNMP Versions</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════
+     DATA FLOW DIAGRAM
+═══════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-label">Architecture</div>
+  <h2>End-to-End Data Flow</h2>
+  <p class="section-sub">
+    From network edge to visualization — every hop in the pktSNMP pipeline, annotated with protocols and formats.
+  </p>
+  <div class="flow-wrap">
+    <svg viewBox="0 0 1020 500" width="1020" height="500" xmlns="http://www.w3.org/2000/svg" style="max-width:100%;height:auto;">
+      <defs>
+        <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="3.5" orient="auto">
+          <path d="M0,0 L8,3.5 L0,7 Z" fill="#00c9a7"/>
+        </marker>
+        <marker id="arr-b" markerWidth="8" markerHeight="8" refX="7" refY="3.5" orient="auto">
+          <path d="M0,0 L8,3.5 L0,7 Z" fill="#3b82f6"/>
+        </marker>
+        <marker id="arr-y" markerWidth="8" markerHeight="8" refX="7" refY="3.5" orient="auto">
+          <path d="M0,0 L8,3.5 L0,7 Z" fill="#f59e0b"/>
+        </marker>
+        <filter id="glow">
+          <feGaussianBlur stdDeviation="3" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+
+      <!-- ── Background grid ── -->
+      <rect width="1020" height="500" fill="#0f1625" rx="12"/>
+      <line x1="0" y1="160" x2="1020" y2="160" stroke="#1e2e48" stroke-width="1" stroke-dasharray="4,8"/>
+      <line x1="0" y1="340" x2="1020" y2="340" stroke="#1e2e48" stroke-width="1" stroke-dasharray="4,8"/>
+
+      <!-- ── Layer labels ── -->
+      <text x="14" y="92" fill="#7c8ea8" font-size="10" font-family="monospace" font-weight="700" letter-spacing="2">NETWORK EDGE</text>
+      <text x="14" y="252" fill="#7c8ea8" font-size="10" font-family="monospace" font-weight="700" letter-spacing="2">COLLECTION LAYER</text>
+      <text x="14" y="432" fill="#7c8ea8" font-size="10" font-family="monospace" font-weight="700" letter-spacing="2">STORAGE + COMPUTE</text>
+
+      <!-- ════════════════════════════════════════
+           ROW 1: Network Devices
+      ════════════════════════════════════════ -->
+
+      <!-- Router -->
+      <rect x="60" y="105" width="110" height="48" rx="8" fill="#162032" stroke="#1e2e48" stroke-width="1.5"/>
+      <text x="115" y="124" text-anchor="middle" fill="#e2e8f0" font-size="11" font-weight="700">🔀 Switch</text>
+      <text x="115" y="140" text-anchor="middle" fill="#7c8ea8" font-size="10">Layer 2/3</text>
+
+      <!-- Firewall -->
+      <rect x="195" y="105" width="110" height="48" rx="8" fill="#162032" stroke="#1e2e48" stroke-width="1.5"/>
+      <text x="250" y="124" text-anchor="middle" fill="#e2e8f0" font-size="11" font-weight="700">🔥 Firewall</text>
+      <text x="250" y="140" text-anchor="middle" fill="#7c8ea8" font-size="10">Perimeter</text>
+
+      <!-- Server -->
+      <rect x="330" y="105" width="110" height="48" rx="8" fill="#162032" stroke="#1e2e48" stroke-width="1.5"/>
+      <text x="385" y="124" text-anchor="middle" fill="#e2e8f0" font-size="11" font-weight="700">🖥 Server</text>
+      <text x="385" y="140" text-anchor="middle" fill="#7c8ea8" font-size="10">Compute</text>
+
+      <!-- Wireless -->
+      <rect x="465" y="105" width="110" height="48" rx="8" fill="#162032" stroke="#1e2e48" stroke-width="1.5"/>
+      <text x="520" y="124" text-anchor="middle" fill="#e2e8f0" font-size="11" font-weight="700">📡 WAP</text>
+      <text x="520" y="140" text-anchor="middle" fill="#7c8ea8" font-size="10">Wireless</text>
+
+      <!-- UPS -->
+      <rect x="600" y="105" width="110" height="48" rx="8" fill="#162032" stroke="#1e2e48" stroke-width="1.5"/>
+      <text x="655" y="124" text-anchor="middle" fill="#e2e8f0" font-size="11" font-weight="700">⚡ UPS</text>
+      <text x="655" y="140" text-anchor="middle" fill="#7c8ea8" font-size="10">Power</text>
+
+      <!-- Router -->
+      <rect x="735" y="105" width="110" height="48" rx="8" fill="#162032" stroke="#1e2e48" stroke-width="1.5"/>
+      <text x="790" y="124" text-anchor="middle" fill="#e2e8f0" font-size="11" font-weight="700">🔁 Router</text>
+      <text x="790" y="140" text-anchor="middle" fill="#7c8ea8" font-size="10">Layer 3</text>
+
+      <!-- ════════════════════════════════════════
+           ROW 2: Collection Layer
+      ════════════════════════════════════════ -->
+
+      <!-- otelcol Medical -->
+      <rect x="60" y="195" width="160" height="108" rx="10" fill="#162032" stroke="#3b82f6" stroke-width="1.5"/>
+      <text x="140" y="217" text-anchor="middle" fill="#3b82f6" font-size="10" font-weight="700" letter-spacing="1">OTELCOL</text>
+      <text x="140" y="233" text-anchor="middle" fill="#e2e8f0" font-size="11" font-weight="700">Medical</text>
+      <text x="140" y="249" text-anchor="middle" fill="#7c8ea8" font-size="10">172.23.80.11</text>
+      <rect x="75" y="258" width="110" height="17" rx="3" fill="#0f1625"/>
+      <text x="130" y="270" text-anchor="middle" fill="#7c8ea8" font-size="9" font-family="monospace">snmp receiver → OTLP</text>
+      <text x="140" y="292" text-anchor="middle" fill="#7c8ea8" font-size="9">gzip · 576 metrics/batch</text>
+
+      <!-- otelcol Dental -->
+      <rect x="244" y="195" width="160" height="108" rx="10" fill="#162032" stroke="#3b82f6" stroke-width="1.5"/>
+      <text x="324" y="217" text-anchor="middle" fill="#3b82f6" font-size="10" font-weight="700" letter-spacing="1">OTELCOL</text>
+      <text x="324" y="233" text-anchor="middle" fill="#e2e8f0" font-size="11" font-weight="700">Dental</text>
+      <text x="324" y="249" text-anchor="middle" fill="#7c8ea8" font-size="10">10.56.57.181</text>
+      <rect x="259" y="258" width="110" height="17" rx="3" fill="#0f1625"/>
+      <text x="314" y="270" text-anchor="middle" fill="#7c8ea8" font-size="9" font-family="monospace">snmp receiver → OTLP</text>
+      <text x="324" y="292" text-anchor="middle" fill="#7c8ea8" font-size="9">gzip · 576 metrics/batch</text>
+
+      <!-- Local Collector -->
+      <rect x="428" y="195" width="160" height="108" rx="10" fill="#162032" stroke="#00c9a7" stroke-width="1.5"/>
+      <text x="508" y="217" text-anchor="middle" fill="#00c9a7" font-size="10" font-weight="700" letter-spacing="1">LOCAL</text>
+      <text x="508" y="233" text-anchor="middle" fill="#e2e8f0" font-size="11" font-weight="700">Built-in Collector</text>
+      <text x="508" y="249" text-anchor="middle" fill="#7c8ea8" font-size="10">In-process / pysnmp</text>
+      <rect x="443" y="258" width="110" height="17" rx="3" fill="#0f1625"/>
+      <text x="498" y="270" text-anchor="middle" fill="#7c8ea8" font-size="9" font-family="monospace">GET polls · asyncio</text>
+      <text x="508" y="292" text-anchor="middle" fill="#7c8ea8" font-size="9">v1 · v2c · v3</text>
+
+      <!-- Trap Receiver -->
+      <rect x="612" y="195" width="160" height="108" rx="10" fill="#162032" stroke="#f59e0b" stroke-width="1.5"/>
+      <text x="692" y="217" text-anchor="middle" fill="#f59e0b" font-size="10" font-weight="700" letter-spacing="1">TRAP RECEIVER</text>
+      <text x="692" y="233" text-anchor="middle" fill="#e2e8f0" font-size="11" font-weight="700">UDP :162</text>
+      <text x="692" y="249" text-anchor="middle" fill="#7c8ea8" font-size="10">Async trap listener</text>
+      <rect x="627" y="258" width="110" height="17" rx="3" fill="#0f1625"/>
+      <text x="682" y="270" text-anchor="middle" fill="#7c8ea8" font-size="9" font-family="monospace">SNMP v1/v2c/v3</text>
+      <text x="692" y="292" text-anchor="middle" fill="#7c8ea8" font-size="9">link-down · coldStart · custom</text>
+
+      <!-- ════════════════════════════════════════
+           ROW 3: pktSNMP Core
+      ════════════════════════════════════════ -->
+
+      <!-- pktSNMP Core box -->
+      <rect x="60" y="355" width="780" height="118" rx="12" fill="#0f1625" stroke="#00c9a7" stroke-width="2"/>
+      <text x="450" y="378" text-anchor="middle" fill="#00c9a7" font-size="11" font-weight="700" letter-spacing="1.5">pktSNMP CORE · FastAPI + uvicorn · O2 · :8767</text>
+
+      <!-- Ingest API -->
+      <rect x="80" y="388" width="135" height="70" rx="7" fill="#162032" stroke="#1e2e48"/>
+      <text x="147" y="405" text-anchor="middle" fill="#e2e8f0" font-size="10" font-weight="700">Ingest API</text>
+      <text x="147" y="421" text-anchor="middle" fill="#7c8ea8" font-size="9" font-family="monospace">/api/snmp/ingest</text>
+      <text x="147" y="435" text-anchor="middle" fill="#7c8ea8" font-size="9" font-family="monospace">/otlp/v1/metrics</text>
+      <text x="147" y="449" text-anchor="middle" fill="#7c8ea8" font-size="9">bulk executemany</text>
+
+      <!-- REST API -->
+      <rect x="230" y="388" width="135" height="70" rx="7" fill="#162032" stroke="#1e2e48"/>
+      <text x="297" y="405" text-anchor="middle" fill="#e2e8f0" font-size="10" font-weight="700">REST API</text>
+      <text x="297" y="421" text-anchor="middle" fill="#7c8ea8" font-size="9">devices · alerts</text>
+      <text x="297" y="435" text-anchor="middle" fill="#7c8ea8" font-size="9">collectors · users</text>
+      <text x="297" y="449" text-anchor="middle" fill="#7c8ea8" font-size="9">JWT + SAML auth</text>
+
+      <!-- Alert Engine -->
+      <rect x="380" y="388" width="135" height="70" rx="7" fill="#162032" stroke="#ef4444"/>
+      <text x="447" y="405" text-anchor="middle" fill="#ef4444" font-size="10" font-weight="700">Alert Engine</text>
+      <text x="447" y="421" text-anchor="middle" fill="#7c8ea8" font-size="9">60 s eval loop</text>
+      <text x="447" y="435" text-anchor="middle" fill="#7c8ea8" font-size="9">12 rule types</text>
+      <text x="447" y="449" text-anchor="middle" fill="#7c8ea8" font-size="9">fire + auto-resolve</text>
+
+      <!-- AI Assistant -->
+      <rect x="530" y="388" width="135" height="70" rx="7" fill="#162032" stroke="#a855f7"/>
+      <text x="597" y="405" text-anchor="middle" fill="#a855f7" font-size="10" font-weight="700">AI Assistant</text>
+      <text x="597" y="421" text-anchor="middle" fill="#7c8ea8" font-size="9">Anthropic Claude</text>
+      <text x="597" y="435" text-anchor="middle" fill="#7c8ea8" font-size="9">NL query over</text>
+      <text x="597" y="449" text-anchor="middle" fill="#7c8ea8" font-size="9">metrics + events</text>
+
+      <!-- Storage backends -->
+      <rect x="680" y="388" width="145" height="70" rx="7" fill="#162032" stroke="#1e2e48"/>
+      <text x="752" y="405" text-anchor="middle" fill="#e2e8f0" font-size="10" font-weight="700">Storage</text>
+      <text x="752" y="421" text-anchor="middle" fill="#7c8ea8" font-size="9">SQLite pktsnmp.db</text>
+      <text x="752" y="435" text-anchor="middle" fill="#7c8ea8" font-size="9">SQLite timeseries.db</text>
+      <text x="752" y="449" text-anchor="middle" fill="#7c8ea8" font-size="9">or ClickHouse</text>
+
+      <!-- ════════════════════════════════════════
+           React UI — right side
+      ════════════════════════════════════════ -->
+      <rect x="862" y="195" width="138" height="278" rx="10" fill="#162032" stroke="#00c9a7" stroke-width="1.5"/>
+      <text x="931" y="218" text-anchor="middle" fill="#00c9a7" font-size="10" font-weight="700" letter-spacing="1">REACT UI</text>
+      <text x="931" y="234" text-anchor="middle" fill="#e2e8f0" font-size="10" font-weight="700">pktSNMP</text>
+      <text x="931" y="250" text-anchor="middle" fill="#7c8ea8" font-size="9">React 18 · TypeScript</text>
+      <text x="931" y="265" text-anchor="middle" fill="#7c8ea8" font-size="9">Tailwind + Vite</text>
+
+      <line x1="880" y1="278" x2="980" y2="278" stroke="#1e2e48" stroke-width="1"/>
+
+      <text x="890" y="297" fill="#7c8ea8" font-size="9">▪ Dashboard</text>
+      <text x="890" y="313" fill="#7c8ea8" font-size="9">▪ Environment Tree</text>
+      <text x="890" y="329" fill="#7c8ea8" font-size="9">▪ Metrics Charts</text>
+      <text x="890" y="345" fill="#7c8ea8" font-size="9">▪ Collectors Status</text>
+      <text x="890" y="361" fill="#7c8ea8" font-size="9">▪ Alert Rules</text>
+      <text x="890" y="377" fill="#7c8ea8" font-size="9">▪ OID Catalog</text>
+      <text x="890" y="393" fill="#7c8ea8" font-size="9">▪ Devices + CSV</text>
+      <text x="890" y="409" fill="#7c8ea8" font-size="9">▪ AI Assistant</text>
+      <text x="890" y="425" fill="#7c8ea8" font-size="9">▪ Settings</text>
+      <text x="890" y="441" fill="#7c8ea8" font-size="9">▪ Logs</text>
+      <text x="890" y="457" fill="#7c8ea8" font-size="9">▪ Users / Roles</text>
+
+      <!-- ════════════════════════════════════════
+           ARROWS
+      ════════════════════════════════════════ -->
+
+      <!-- Devices → otelcol Medical (SNMP GET) -->
+      <line x1="115" y1="153" x2="115" y2="193" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arr-b)"/>
+      <line x1="250" y1="153" x2="250" y2="193" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arr-b)"/>
+
+      <!-- Devices → otelcol Dental -->
+      <line x1="385" y1="153" x2="355" y2="193" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arr-b)"/>
+      <line x1="520" y1="153" x2="490" y2="193" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arr-b)"/>
+
+      <!-- Devices → Local collector (SNMP GET) -->
+      <line x1="520" y1="153" x2="520" y2="193" stroke="#00c9a7" stroke-width="1.5" marker-end="url(#arr)"/>
+
+      <!-- Devices → Trap Receiver (UDP 162) -->
+      <line x1="655" y1="153" x2="680" y2="193" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arr-y)"/>
+      <line x1="790" y1="153" x2="750" y2="193" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arr-y)"/>
+
+      <!-- otelcol → Ingest API (OTLP HTTP gzip) -->
+      <line x1="140" y1="303" x2="147" y2="386" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arr-b)"/>
+      <line x1="324" y1="303" x2="200" y2="386" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arr-b)"/>
+
+      <!-- Local → Core -->
+      <line x1="508" y1="303" x2="447" y2="386" stroke="#00c9a7" stroke-width="1.5" marker-end="url(#arr)"/>
+
+      <!-- Trap → Core -->
+      <line x1="692" y1="303" x2="597" y2="386" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arr-y)"/>
+
+      <!-- Core → UI (REST API) -->
+      <line x1="840" y1="414" x2="860" y2="414" stroke="#00c9a7" stroke-width="1.5" marker-end="url(#arr)" stroke-dasharray="5,3"/>
+
+      <!-- Arrow labels -->
+      <rect x="68" y="165" width="62" height="14" rx="3" fill="#0f1625"/>
+      <text x="99" y="176" text-anchor="middle" fill="#3b82f6" font-size="8" font-family="monospace">SNMP GET</text>
+
+      <rect x="248" y="165" width="62" height="14" rx="3" fill="#0f1625"/>
+      <text x="279" y="176" text-anchor="middle" fill="#3b82f6" font-size="8" font-family="monospace">SNMP GET</text>
+
+      <rect x="445" y="165" width="62" height="14" rx="3" fill="#0f1625"/>
+      <text x="476" y="176" text-anchor="middle" fill="#00c9a7" font-size="8" font-family="monospace">SNMP GET</text>
+
+      <rect x="648" y="165" width="62" height="14" rx="3" fill="#0f1625"/>
+      <text x="679" y="176" text-anchor="middle" fill="#f59e0b" font-size="8" font-family="monospace">UDP :162</text>
+
+      <rect x="50" y="326" width="100" height="14" rx="3" fill="#0f1625"/>
+      <text x="100" y="337" text-anchor="middle" fill="#3b82f6" font-size="8" font-family="monospace">OTLP HTTP gzip</text>
+
+      <rect x="836" y="404" width="60" height="14" rx="3" fill="#0f1625"/>
+      <text x="866" y="415" text-anchor="middle" fill="#00c9a7" font-size="8" font-family="monospace">REST JSON</text>
+
+    </svg>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     INGEST PIPELINE STEPS
+═══════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-label">Ingest Pipeline</div>
+  <h2>From Poll to Persistence</h2>
+  <p class="section-sub">Each metric traverses a validated pipeline before hitting storage.</p>
+  <div class="pipeline">
+    <div class="pipeline-step">
+      <div class="ps-num">Step 01</div>
+      <div class="ps-title">Device Poll</div>
+      <div class="ps-body">otelcol SNMP receiver or pysnmp issues SNMPv1/v2c/v3 GET requests to managed devices on the configured interval.</div>
+    </div>
+    <div class="ps-arrow">→</div>
+    <div class="pipeline-step">
+      <div class="ps-num">Step 02</div>
+      <div class="ps-title">OTLP Batch</div>
+      <div class="ps-body">otelcol collects metrics into batches (~576 per batch), gzip-compresses, and POST to <code style="font-size:.8em;color:var(--accent)">/api/snmp/ingest/otlp/v1/metrics</code>.</div>
+    </div>
+    <div class="ps-arrow">→</div>
+    <div class="pipeline-step">
+      <div class="ps-num">Step 03</div>
+      <div class="ps-title">Decompress + Parse</div>
+      <div class="ps-body">pktSNMP detects gzip magic bytes, decompresses, and parses OTLP JSON. Extracts metric name, value, timestamp, and labels.</div>
+    </div>
+    <div class="ps-arrow">→</div>
+    <div class="pipeline-step">
+      <div class="ps-num">Step 04</div>
+      <div class="ps-title">Device Resolution</div>
+      <div class="ps-body">Metric path (<code style="font-size:.8em;color:var(--accent)">SNMP/SITE/DEVICE/OID</code>) matched against <code style="font-size:.8em;color:var(--accent)">otelcol_label</code> in the devices table to resolve device_id.</div>
+    </div>
+    <div class="ps-arrow">→</div>
+    <div class="pipeline-step">
+      <div class="ps-num">Step 05</div>
+      <div class="ps-title">Bulk Insert</div>
+      <div class="ps-body">Single <code style="font-size:.8em;color:var(--accent)">executemany</code> call writes the full batch to <code style="font-size:.8em;color:var(--accent)">snmp_poll_results</code>. Avoids per-row I/O overhead on EFS-backed storage.</div>
+    </div>
+    <div class="ps-arrow">→</div>
+    <div class="pipeline-step">
+      <div class="ps-num">Step 06</div>
+      <div class="ps-title">Alert Eval</div>
+      <div class="ps-body">Alert engine evaluates all enabled rules on a 60 s loop. Fires, deduplicates, auto-resolves, and dispatches notifications.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     FEATURES
+═══════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-label">Capabilities</div>
+  <h2>Platform Features</h2>
+  <p class="section-sub">Everything needed to manage, visualize, and alert on SNMP data across your infrastructure.</p>
+
+  <div class="feature-grid">
+
+    <div class="feat-card">
+      <span class="feat-icon">📡</span>
+      <div class="feat-title">Multi-Mode Collection</div>
+      <div class="feat-body">Supports remote OpenTelemetry Collector instances (OTLP HTTP) and a built-in pysnmp local collector — both operating concurrently. Add and remove collectors from the UI without touching config files.</div>
+    </div>
+
+    <div class="feat-card">
+      <span class="feat-icon">🏗</span>
+      <div class="feat-title">4-Level Device Hierarchy</div>
+      <div class="feat-body"><strong style="color:var(--text)">Org → Group → Site → Device.</strong> Status rolls up automatically — a single downed device turns the parent Org red. Supports HA pairs (active/standby) and CSV bulk import/export.</div>
+    </div>
+
+    <div class="feat-card">
+      <span class="feat-icon">📊</span>
+      <div class="feat-title">Rich Metrics UI</div>
+      <div class="feat-body">Per-device time-series charts for traffic (bps), packets/s, errors, discards, and interface speed. Status timelines, alert overlays, and CSV export. URL-synced device and time-range params for deep linking.</div>
+    </div>
+
+    <div class="feat-card">
+      <span class="feat-icon">🔔</span>
+      <div class="feat-title">Intelligent Alert Engine</div>
+      <div class="feat-body">12 built-in rule evaluators covering interface down, flap detection, threshold breaches, bandwidth utilization, spike detection, trap events, and collector gaps. Auto-fires and auto-resolves with cooldown windows.</div>
+    </div>
+
+    <div class="feat-card">
+      <span class="feat-icon">📣</span>
+      <div class="feat-title">Multi-Channel Notifications</div>
+      <div class="feat-body">Alert events deliver to in-app badge, email, Slack, PagerDuty, or custom webhook. Per-rule channel assignment. Notification log persisted to SQLite for full audit trail.</div>
+    </div>
+
+    <div class="feat-card">
+      <span class="feat-icon">🤖</span>
+      <div class="feat-title">AI Assistant</div>
+      <div class="feat-body">Anthropic-powered natural language interface. Ask questions about device health, recent metrics, and alert history without writing a single query. Context-aware across your live device and event data.</div>
+    </div>
+
+    <div class="feat-card">
+      <span class="feat-icon">🔐</span>
+      <div class="feat-title">Enterprise Auth</div>
+      <div class="feat-body">JWT access tokens (15 min) + httpOnly refresh tokens (7 days). Okta SAML 2.0 SSO integration. Role-based access control. SNMP community strings and v3 credentials encrypted at rest.</div>
+    </div>
+
+    <div class="feat-card">
+      <span class="feat-icon">🗄</span>
+      <div class="feat-title">Switchable Storage Backends</div>
+      <div class="feat-body">Zero-config SQLite for most deployments. Switch to ClickHouse for high-volume environments or long-term retention. Backend selection persists in settings; switchover requires a service restart.</div>
+    </div>
+
+    <div class="feat-card">
+      <span class="feat-icon">♻️</span>
+      <div class="feat-title">Automated Backup</div>
+      <div class="feat-body">Configurable schedule and retention policy from the Settings UI. On-demand via the REST API. Backs up both the control-plane and time-series SQLite databases to a configurable backup directory.</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     ALERT RULES
+═══════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-label">Alert Engine</div>
+  <h2>12 Built-In Rule Types</h2>
+  <p class="section-sub">Every rule fires, deduplicates, and auto-resolves — no manual close required.</p>
+  <div class="alert-grid">
+    <div class="alert-item"><span class="sev crit"></span><div><div class="alert-name">Interface Down</div><div class="alert-desc">ifOperStatus transitions to down</div></div></div>
+    <div class="alert-item"><span class="sev warn"></span><div><div class="alert-name">Interface Flap</div><div class="alert-desc">Repeated up/down oscillation</div></div></div>
+    <div class="alert-item"><span class="sev warn"></span><div><div class="alert-name">Metric Threshold</div><div class="alert-desc">Any OID value crosses a configured bound</div></div></div>
+    <div class="alert-item"><span class="sev warn"></span><div><div class="alert-name">Metric Spike</div><div class="alert-desc">Sudden deviation from rolling baseline</div></div></div>
+    <div class="alert-item"><span class="sev warn"></span><div><div class="alert-name">Error Rate</div><div class="alert-desc">ifInErrors or ifOutErrors rate too high</div></div></div>
+    <div class="alert-item"><span class="sev warn"></span><div><div class="alert-name">Discard Rate</div><div class="alert-desc">ifInDiscards or ifOutDiscards rate too high</div></div></div>
+    <div class="alert-item"><span class="sev info"></span><div><div class="alert-name">High Error Ratio</div><div class="alert-desc">Errors as % of total traffic</div></div></div>
+    <div class="alert-item"><span class="sev warn"></span><div><div class="alert-name">Bandwidth Utilization</div><div class="alert-desc">Link utilization % vs ifSpeed</div></div></div>
+    <div class="alert-item"><span class="sev info"></span><div><div class="alert-name">Speed Change</div><div class="alert-desc">ifSpeed changes unexpectedly</div></div></div>
+    <div class="alert-item"><span class="sev crit"></span><div><div class="alert-name">Collector Gap</div><div class="alert-desc">No data received from a collector</div></div></div>
+    <div class="alert-item"><span class="sev crit"></span><div><div class="alert-name">Device Unreachable</div><div class="alert-desc">No data for device beyond threshold</div></div></div>
+    <div class="alert-item"><span class="sev warn"></span><div><div class="alert-name">Trap Received</div><div class="alert-desc">SNMP trap event from any device</div></div></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     TECH STACK
+═══════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-label">Technical Reference</div>
+  <h2>Stack &amp; Specifications</h2>
+  <p class="section-sub">Production-grade components, chosen for reliability at scale.</p>
+
+  <div style="overflow-x:auto; background:var(--surface); border:1px solid var(--border); border-radius:12px;">
+    <table class="stack-table">
+      <thead>
+        <tr>
+          <th>Layer</th>
+          <th>Technology</th>
+          <th>Details</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Backend</strong></td>
+          <td>FastAPI + uvicorn</td>
+          <td>Python 3.11+ · async throughout · aiosqlite for non-blocking DB access</td>
+        </tr>
+        <tr>
+          <td><strong>Control DB</strong></td>
+          <td>SQLite <code>pktsnmp.db</code></td>
+          <td>Devices, collectors, users, alert rules, alert events, notification log, settings</td>
+        </tr>
+        <tr>
+          <td><strong>Time-Series DB</strong></td>
+          <td>SQLite <code>snmp_timeseries.db</code> or ClickHouse</td>
+          <td><code>snmp_poll_results</code> · <code>snmp_traps</code> · switchable at runtime via Settings</td>
+        </tr>
+        <tr>
+          <td><strong>Frontend</strong></td>
+          <td>React 18 + TypeScript</td>
+          <td>Tailwind CSS · Vite build · Recharts for time-series visualization · SPA served by uvicorn StaticFiles</td>
+        </tr>
+        <tr>
+          <td><strong>Auth</strong></td>
+          <td>JWT + Okta SAML 2.0</td>
+          <td>15-min access tokens · 7-day httpOnly refresh · SAML SSO · RBAC roles</td>
+        </tr>
+        <tr>
+          <td><strong>SNMP</strong></td>
+          <td>pysnmp-lextudio</td>
+          <td>v1/v2c/v3 GET polling + trap reception on UDP 162 · CAP_NET_BIND_SERVICE via systemd</td>
+        </tr>
+        <tr>
+          <td><strong>Ingest Protocol</strong></td>
+          <td>OTLP HTTP (OpenTelemetry)</td>
+          <td>gzip-compressed JSON · bearer token auth per collector · 30 s timeout · ~576 metrics/batch</td>
+        </tr>
+        <tr>
+          <td><strong>Remote Collectors</strong></td>
+          <td>otelcol-contrib</td>
+          <td>SNMP receiver → <code>otlphttp/pktsnmp</code> exporter · SSH sync from Settings UI · per-collector token rotation</td>
+        </tr>
+        <tr>
+          <td><strong>AI</strong></td>
+          <td>Anthropic Claude</td>
+          <td>Natural language queries over live metrics and alert events via integrated assistant page</td>
+        </tr>
+        <tr>
+          <td><strong>Notifications</strong></td>
+          <td>in-app · email · Slack · PagerDuty · webhook</td>
+          <td>Per-rule channel assignment · persistent notification log</td>
+        </tr>
+        <tr>
+          <td><strong>Service</strong></td>
+          <td>systemd <code>pktsnmp.service</code></td>
+          <td>Auto-restart · journald logging · capability grants for UDP 162</td>
+        </tr>
+        <tr>
+          <td><strong>OID Coverage</strong></td>
+          <td>IF-MIB (RFC 2863)</td>
+          <td>ifInOctets · ifOutOctets · ifInUcastPkts · ifOutUcastPkts · ifInErrors · ifOutErrors · ifInDiscards · ifOutDiscards · ifOperStatus · ifAdminStatus · ifSpeed</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     FOOTER
+═══════════════════════════════════════════════════════ -->
+<footer>
+  <img src="lockup.svg" alt="pktSNMP" onerror="this.src='icon.svg';this.style.height='28px'"/>
+  <div class="footer-meta">pktSNMP · Part of the pktSuite Network Operations Platform</div>
+  <div class="footer-pills">
+    <span class="footer-pill">FastAPI</span>
+    <span class="footer-pill">React 18</span>
+    <span class="footer-pill">OpenTelemetry</span>
+    <span class="footer-pill">SQLite / ClickHouse</span>
+    <span class="footer-pill">Okta SAML</span>
+    <span class="footer-pill">Python 3.11+</span>
+  </div>
+</footer>
+
+</body>
+</html>
