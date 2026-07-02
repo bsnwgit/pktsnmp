@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
 """Quick deploy: Layout.tsx nav reorder + frontend rebuild."""
+
+# ── Configuration — update these before running ────────────────────────────
+# SERVER_HOST      = "SERVER-IP"       # pktSNMP server IP or hostname
+# COLLECTOR_1_HOST = "COLLECTOR-1-IP"  # Remote otelcol collector 1
+# SSH_USER         = "ssh-user"        # SSH username on the server
+# SSH_KEY_PATH     = r"PATH\TO\YOUR-KEY.pem"  # SSH private key
+# ──────────────────────────────────────────────────────────────────────────
+
 import os, sys, time
 import paramiko
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-HOST     = "172.23.80.5"
-USER     = "ec2-user"
-KEY_PATH = r"C:\Users\robert.barnett\.ssh\VyneCorpNetInfra.pem"
+HOST     = "SERVER-IP"
+USER     = "ssh-user"
+KEY_PATH = r"PATH\TO\YOUR-KEY.pem"
 LOCAL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REMOTE_APP = "/mnt/software/pktsnmp"
 NVM = 'export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh"'

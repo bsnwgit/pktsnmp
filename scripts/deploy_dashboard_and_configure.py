@@ -7,18 +7,26 @@ deploy_dashboard_and_configure.py
    PEM keys already on this machine — no manual UI steps needed.
 
 Collector config applied:
-  id=2  Medical   172.23.80.11  VyneCorpNetInfra.pem
-  id=3  Dental    10.56.57.181  corporate_infrastructure.pem
+  id=2  Medical   COLLECTOR-1-IP  server-key.pem
+  id=3  Dental    COLLECTOR-2-IP  collector-key.pem
 """
+
+# ── Configuration — update these before running ────────────────────────────
+# SERVER_HOST      = "SERVER-IP"       # pktSNMP server IP or hostname
+# COLLECTOR_1_HOST = "COLLECTOR-1-IP"  # Remote otelcol collector 1
+# SSH_USER         = "ssh-user"        # SSH username on the server
+# SSH_KEY_PATH     = r"PATH\TO\YOUR-KEY.pem"  # SSH private key
+# ──────────────────────────────────────────────────────────────────────────
+
 import os, sys, time
 import paramiko
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-HOST     = "172.23.80.5"
+HOST     = "SERVER-IP"
 PORT     = 22
-USER     = "ec2-user"
-KEY_PATH = r"C:\Users\robert.barnett\.ssh\VyneCorpNetInfra.pem"
+USER     = "ssh-user"
+KEY_PATH = r"PATH\TO\YOUR-KEY.pem"
 
 LOCAL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REMOTE_APP = "/mnt/software/pktsnmp"
@@ -34,23 +42,23 @@ FRONTEND_FILES = [
 COLLECTOR_SSH = [
     {
         "id":             2,
-        "name":           "Medical otelcol",
-        "ip":             "172.23.80.11",
-        "ssh_host":       "172.23.80.11",
-        "ssh_user":       "ec2-user",
+        "name":           "Collector-1 otelcol",
+        "ip":             "COLLECTOR-1-IP",
+        "ssh_host":       "COLLECTOR-1-IP",
+        "ssh_user":       "ssh-user",
         "ssh_auth_type":  "key",
-        "key_path":       r"C:\Users\robert.barnett\.ssh\VyneCorpNetInfra.pem",
+        "key_path":       r"PATH\TO\YOUR-KEY.pem",
         "otelcol_config_path": "/mnt/software/otel/config/otelcol-config.yaml",
         "otelcol_service":     "otelcol",
     },
     {
         "id":             3,
-        "name":           "Dental otelcol",
-        "ip":             "10.56.57.181",
-        "ssh_host":       "10.56.57.181",
-        "ssh_user":       "ec2-user",
+        "name":           "Collector-2 otelcol",
+        "ip":             "COLLECTOR-2-IP",
+        "ssh_host":       "COLLECTOR-2-IP",
+        "ssh_user":       "ssh-user",
         "ssh_auth_type":  "key",
-        "key_path":       r"C:\Users\robert.barnett\.ssh\corporate_infrastructure.pem",
+        "key_path":       r"PATH\TO\COLLECTOR-KEY.pem",
         "otelcol_config_path": "/mnt/software/otel/config/otelcol-config.yaml",
         "otelcol_service":     "otelcol",
     },

@@ -1,12 +1,20 @@
 #!/usr/bin/env python3
 """Deploy HA tree filter — backend only, no frontend rebuild."""
+
+# ── Configuration — update these before running ────────────────────────────
+# SERVER_HOST      = "SERVER-IP"       # pktSNMP server IP or hostname
+# COLLECTOR_1_HOST = "COLLECTOR-1-IP"  # Remote otelcol collector 1
+# SSH_USER         = "ssh-user"        # SSH username on the server
+# SSH_KEY_PATH     = r"PATH\TO\YOUR-KEY.pem"  # SSH private key
+# ──────────────────────────────────────────────────────────────────────────
+
 import sys, time
 import paramiko
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-HOST, PORT, USER = "172.23.80.5", 22, "ec2-user"
-KEY_PATH   = r"C:\Users\robert.barnett\.ssh\VyneCorpNetInfra.pem"
+HOST, PORT, USER = "SERVER-IP", 22, "ssh-user"
+KEY_PATH   = r"PATH\TO\YOUR-KEY.pem"
 REMOTE_APP = "/mnt/software/pktsnmp"
 SERVICE    = "pktsnmp"
 

@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
 """Quick diagnostic: device status, poll settings, recent logs."""
+
+# ── Configuration — update these before running ────────────────────────────
+# SERVER_HOST      = "SERVER-IP"       # pktSNMP server IP or hostname
+# COLLECTOR_1_HOST = "COLLECTOR-1-IP"  # Remote otelcol collector 1
+# SSH_USER         = "ssh-user"        # SSH username on the server
+# SSH_KEY_PATH     = r"PATH\TO\YOUR-KEY.pem"  # SSH private key
+# ──────────────────────────────────────────────────────────────────────────
+
 import paramiko
 
-HOST     = "172.23.80.5"
-USER     = "ec2-user"
-KEY_PATH = r"C:\Users\robert.barnett\.ssh\VyneCorpNetInfra.pem"
+HOST     = "SERVER-IP"
+USER     = "ssh-user"
+KEY_PATH = r"PATH\TO\YOUR-KEY.pem"
 DB       = "/mnt/software/pktsnmp/pktsnmp.db"
 
 ssh = paramiko.SSHClient()
