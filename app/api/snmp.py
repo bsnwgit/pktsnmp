@@ -1459,7 +1459,7 @@ async def device_metrics_latest_by_ip(
     device_ip: str,
     _: CurrentUser,
 ) -> list[dict]:
-    """Latest values for unregistered devices (dental path labels, etc.).
+    """Latest values for devices matched by IP rather than registered device_id.
     Used when device_id is not known.
     """
     from app.storage.factory import get_storage

@@ -2,12 +2,13 @@
 
 SNMP ingest management and visualization platform — part of the pkt suite. Receives SNMP data from remote otelcol collectors and local devices, stores it in SQLite (or ClickHouse), and surfaces it through a React UI with real-time alerting and an AI assistant.
 
-**Port:** `8767` &nbsp;|&nbsp; **App path (O2):** `/mnt/software/pktsnmp` &nbsp;|&nbsp; **Server:** O2 at `SERVER-IP`
+**Image:** `ghcr.io/bsnwgit/pktsnmp:latest` &nbsp;|&nbsp; **Default port:** `80` (HTTP) / `443` (HTTPS)
 
 ---
 
 ## Table of Contents
 
+- [Docker Install (Recommended)](#docker-install-recommended)
 - [Architecture](#architecture)
 - [Prerequisites](#prerequisites)
 - [Fresh Install](#fresh-install)
@@ -26,6 +27,97 @@ SNMP ingest management and visualization platform — part of the pkt suite. Rec
 - [pktHub Integration](#pkthub-integration)
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
+
+---
+
+## Docker Install (Recommended)
+
+pktSNMP is distributed as a single Docker image on GitHub Container Registry.
+
+### Quick start
+
+```bash
+docker run -d \
+  --name pktsnmp \
+  -p 80:80 \
+  -p 162:162/udp \
+  -v pktsnmp-data:/data \
+  -e APP_ADMIN_PASSWORD=changeme \
+  ghcr.io/bsnwgit/pktsnmp:latest
+```
+
+Open `http://YOUR-SERVER-IP` and log in as `admin` / `changeme`.
+
+### Docker Compose
+
+```yaml
+services:
+  pktsnmp:
+    image: ghcr.io/bsnwgit/pktsnmp:latest
+    container_name: pktsnmp
+    restart: unless-stopped
+    ports:
+      - "80:80"       # HTTP  — set APP_HTTP_PORT to change the host side
+      - "443:443"     # HTTPS — only used when SSL is enabled in Settings
+      - "162:162/udp" # SNMP trap receiver
+    volumes:
+      - pktsnmp-data:/data
+    environment:
+      APP_ADMIN_PASSWORD: changeme   # Required on first run; ignored after DB exists
+      # APP_SECRET_KEY: ""           # Auto-generated and persisted to /data/.secret_key
+      # APP_HTTP_PORT: 80
+      # APP_HTTPS_PORT: 443
+      # APP_TRAP_PORT: 162
+
+volumes:
+  pktsnmp-data:
+```
+
+### Environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `APP_ADMIN_PASSWORD` | _(none)_ | **Required on first run.** Creates the `admin` account. Ignored once users exist. |
+| `APP_SECRET_KEY` | _(auto)_ | JWT signing key. Auto-generated and saved to `/data/.secret_key` on first boot. |
+| `APP_HTTP_PORT` | `80` | Port the app listens on when SSL is disabled. |
+| `APP_HTTPS_PORT` | `443` | Port the app listens on when SSL is enabled (configured in Settings → Auth). |
+| `APP_TRAP_PORT` | `162` | UDP port for the SNMP trap receiver. |
+| `PKTSNMP_DB_PATH` | `/data/pktsnmp.db` | SQLite app database path. |
+| `PKTSNMP_DUCKDB_PATH` | `/data/snmp.duckdb` | DuckDB time-series database path. |
+| `PKTSNMP_LOG_FILE` | `/data/logs/pktsnmp.log` | Log file path. |
+
+### Persistent data
+
+All state lives in the `/data` volume:
+
+```
+/data/
+  pktsnmp.db         ← SQLite: settings, users, devices, collectors, alerts
+  snmp.duckdb        ← DuckDB: SNMP time-series (default backend)
+  logs/pktsnmp.log   ← Application log
+  ssl/               ← Drop server.crt + server.key here to enable HTTPS
+  .secret_key        ← Auto-generated JWT signing key (do not delete)
+```
+
+Mount `/data` as a named volume or host directory to retain data across container updates and reboots.
+
+### SSL / HTTPS
+
+1. Place your certificate at `/data/ssl/server.crt` and private key at `/data/ssl/server.key`.
+2. In the UI, go to **Settings → Auth → SSL** and enable SSL.
+3. Restart the container. The app will bind to `APP_HTTPS_PORT` (default `443`) using your cert.
+
+### Updating
+
+```bash
+docker pull ghcr.io/bsnwgit/pktsnmp:latest
+docker stop pktsnmp && docker rm pktsnmp
+# Re-run the same docker run / compose up command — data volume is preserved.
+```
+
+### CI/CD
+
+GitHub Actions automatically builds and pushes the image on every push to `main` (tagged `:latest`) and `feature/docker` (tagged by git SHA). The workflow is at `.github/workflows/docker.yml`.
 
 ---
 

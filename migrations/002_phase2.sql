@@ -19,13 +19,14 @@ CREATE TABLE IF NOT EXISTS collectors (
 );
 
 INSERT OR IGNORE INTO collectors (id, name, description, ip)
-VALUES (1, 'local', 'Built-in local collector (in-process on O2)', '172.23.80.5');
+VALUES (1, 'local', 'Built-in local collector (in-process on this server)', 'localhost');
 
-INSERT OR IGNORE INTO collectors (id, name, description, ip)
-VALUES (2, 'medical', 'Medical otelcol collector', '172.23.80.11');
-
-INSERT OR IGNORE INTO collectors (id, name, description, ip)
-VALUES (3, 'dental', 'Dental otelcol collector', '10.56.57.181');
+-- Remote collector seeds removed — add your own via Settings → Collectors.
+-- INSERT OR IGNORE INTO collectors (id, name, description, ip)
+-- VALUES (2, 'collector-1', 'Remote otelcol collector 1', 'COLLECTOR-1-IP');
+--
+-- INSERT OR IGNORE INTO collectors (id, name, description, ip)
+-- VALUES (3, 'collector-2', 'Remote otelcol collector 2', 'COLLECTOR-2-IP');
 
 -- Expand devices table (ALTER TABLE — each column added individually)
 ALTER TABLE devices ADD COLUMN collector_id INTEGER REFERENCES collectors(id) DEFAULT 1;
@@ -41,21 +42,14 @@ ALTER TABLE devices ADD COLUMN auth_key_enc TEXT;
 ALTER TABLE devices ADD COLUMN priv_protocol TEXT NOT NULL DEFAULT 'AES128';
 ALTER TABLE devices ADD COLUMN priv_key_enc TEXT;
 
--- Seed live devices (medical collector)
-INSERT OR IGNORE INTO devices (name, ip, site, snmp_version, community, collector_id, otelcol_label, enabled)
-VALUES
-  ('QTS SW1',     '172.27.28.2',   'medical', 'v3',  '',                 2, 'QTS/SW1',      1),
-  ('QTS FW3',     '172.27.28.89',  'medical', 'v2c', '5cNK!ate3RxNALCA', 2, 'QTS/FW3',      1),
-  ('QTS FW4',     '172.27.28.88',  'medical', 'v2c', '5cNK!ate3RxNALCA', 2, 'QTS/FW4',      1),
-  ('OneNeck SW1', '192.168.44.33', 'medical', 'v2c', '5cNK!ate3RxNALCA', 2, 'ON/SW1',       1),
-  ('OneNeck FW1', '192.168.44.7',  'medical', 'v2c', '5cNK!ate3RxNALCA', 2, 'OneNeck/FW1',  1),
-  ('OneNeck FW2', '192.168.44.8',  'medical', 'v2c', '5cNK!ate3RxNALCA', 2, 'OneNeck/FW2',  1);
-
--- Seed live devices (dental collector)
-INSERT OR IGNORE INTO devices (name, ip, site, snmp_version, community, collector_id, otelcol_label, enabled)
-VALUES
-  ('AWS AZ2A', '10.19.56.186', 'dental', 'v2c', '5cNK!ate3RxNALCA', 3, 'AWS/AZ2A', 1),
-  ('AWS AZ2B', '10.19.81.236', 'dental', 'v2c', '5cNK!ate3RxNALCA', 3, 'AWS/AZ2B', 1);
+-- Device seeds removed — add your devices via Settings → Devices or CSV import.
+-- Example (v2c):
+--   INSERT OR IGNORE INTO devices (name, ip, site, snmp_version, community, collector_id, otelcol_label, enabled)
+--   VALUES ('Core-SW-01', '10.0.0.1', 'site1', 'v2c', 'YOUR-COMMUNITY-STRING', 1, 'SITE1/SW1', 1);
+--
+-- Example (v3):
+--   INSERT OR IGNORE INTO devices (name, ip, site, snmp_version, collector_id, otelcol_label, enabled)
+--   VALUES ('Core-FW-01', '10.0.0.2', 'site1', 'v3', 1, 'SITE1/FW1', 1);
 
 -- OID catalog
 CREATE TABLE IF NOT EXISTS oid_catalog (

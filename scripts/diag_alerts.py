@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
 """Diagnose alert/data pipeline on O2."""
+
+# ── Configuration — update these before running ────────────────────────────
+# SERVER_HOST      = "SERVER-IP"       # pktSNMP server IP or hostname
+# COLLECTOR_1_HOST = "COLLECTOR-1-IP"  # Remote otelcol collector 1
+# SSH_USER         = "ssh-user"        # SSH username on the server
+# SSH_KEY_PATH     = r"PATH\TO\YOUR-KEY.pem"  # SSH private key
+# ──────────────────────────────────────────────────────────────────────────
+
 import paramiko, sys
 sys.stdout.reconfigure(encoding="utf-8")
 
-KEY_PATH = r"C:\Users\robert.barnett\.ssh\VyneCorpNetInfra.pem"
+KEY_PATH = r"PATH\TO\YOUR-KEY.pem"
 key = paramiko.RSAKey.from_private_key_file(KEY_PATH)
 c = paramiko.SSHClient()
 c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-c.connect("172.23.80.5", username="ec2-user", pkey=key, timeout=15)
+c.connect("SERVER-IP", username="ssh-user", pkey=key, timeout=15)
 print("Connected.\n")
 
 def run(cmd):
