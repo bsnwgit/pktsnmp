@@ -4,28 +4,21 @@
 
 pktSNMP can receive SNMP data from two sources:
 
-1. **Local collector** — built-in, runs in-process on O2 at startup. Polls devices assigned to `collector_id=1` using pysnmp. Also listens for raw SNMP traps on UDP 162.
-2. **Remote otelcol collectors** — existing OpenTelemetry Collector instances doing SNMP polling via the native `snmp` receiver. Redirected to push OTLP HTTP JSON to pktSNMP's ingest endpoint.
+1. **Local collector** — built-in, runs in-process on the server at startup. Polls devices assigned to `collector_id=1` using pysnmp. Also listens for raw SNMP traps on UDP 162.
+2. **Remote otelcol collectors** — OpenTelemetry Collector instances doing SNMP polling via the native `snmp` receiver. Redirected to push OTLP HTTP JSON to pktSNMP's ingest endpoint.
 
 ---
 
-## Existing Infrastructure (Example)
+## Existing Collectors
 
-### Medical Collector
-- **Host:** 203.0.113.11 (ec2-user)
-- **Service:** `otelcol.service`
-- **Config:** `/mnt/software/otel/config/otelcol-config.yaml`
-- **Binary:** `/mnt/software/otel/otelcol`
-- **Devices polled:** SiteA SW1 (v3), SiteA FW3/FW4 (v2c), SiteB SW1/FW1/FW2 (v2c)
-- **Pipelines:** `metrics/switch`, `metrics/firewall`
+Each site with an existing otelcol deployment requires a one-time redirect to point SNMP pipelines at pktSNMP. Document each collector here:
 
-### Dental Collector
-- **Host:** 203.0.113.12 (ec2-user)
-- **SSH key:** `your-key.pem`
-- **Service:** `otelcol.service`
-- **Config:** `/mnt/software/otel/config/otelcol-config.yaml`
-- **Devices polled:** AWS AZ2A (10.19.56.186), AWS AZ2B (10.19.81.236)
-- **Pipeline:** `metrics/firewall`
+| Collector name | Host | SSH user | Devices polled |
+|---|---|---|---|
+| collector-1 | COLLECTOR-HOST-1 | ssh-user | Device A (v3), Device B/C (v2c) |
+| collector-2 | COLLECTOR-HOST-2 | ssh-user | Device D, Device E |
+
+Update this table with your actual collector inventory. Each collector must have a unique bearer token generated in pktSNMP.
 
 ---
 
@@ -35,22 +28,22 @@ Run the automated scripts (one-time setup, then each time you rotate tokens):
 
 ```bash
 # On Windows — Python + Paramiko, no ssh.exe
-python scripts/update_collector_medical.py
-python scripts/update_collector_dental.py
+python scripts/update_collector_1.py
+python scripts/update_collector_2.py
 ```
 
 Each script:
 1. Generates a `secrets.token_urlsafe(32)` bearer token
-2. Writes the token to SQLite on O2 (`UPDATE collectors SET api_token=…`)
+2. Writes the token to SQLite on the server (`UPDATE collectors SET api_token=…`)
 3. SSHes to the collector host
 4. Backs up the current config
-5. Injects an `otlphttp/pktsnmp` exporter pointing to `http://203.0.113.10:8767/api/snmp/ingest/otlp`
-6. Removes `otlp/openobserve` from the SNMP pipelines
+5. Injects an `otlphttp/pktsnmp` exporter pointing to `http://SERVER-IP:8767/api/snmp/ingest/otlp`
+6. Removes the previous SNMP pipeline exporter
 7. Validates the new config (`otelcol validate`)
 8. Restarts `otelcol.service`
 9. Prints the token (shown once — paste it in Settings → Collectors if needed)
 
-After running, otelcol still exports to OpenObserve for all non-SNMP pipelines. Only the SNMP pipelines are redirected.
+After running, otelcol still exports to its original destination for all non-SNMP pipelines. Only the SNMP pipelines are redirected.
 
 ---
 
@@ -62,10 +55,10 @@ otelcol's `snmp` receiver produces metrics with names like:
 SNMP/<SITE>/<DEVICE>/<OID_NAME>
 ```
 
-Examples from medical config:
-- `SNMP/SiteA/SW1/ifInOctets`
-- `SNMP/SiteB/FW1/sysUpTime`
-- `SNMP/SiteA/FW3/ifOperStatus`
+Examples:
+- `SNMP/SITE1/SW1/ifInOctets`
+- `SNMP/SITE1/SW1/sysUpTime`
+- `SNMP/SITE2/FW1/ifOperStatus`
 
 pktSNMP parses these by stripping the `SNMP/` prefix and matching the `<SITE>/<DEVICE>` portion against the `otelcol_label` field on each device record. Set `otelcol_label` in Settings → Devices to match the collector's label exactly.
 
@@ -73,19 +66,19 @@ pktSNMP parses these by stripping the `SNMP/` prefix and matching the `<SITE>/<D
 
 ## Collector Token Auth
 
-Each collector (medical, dental, etc.) has a unique bearer token stored in the `collectors.api_token` column in SQLite. The otelcol config sends it as:
+Each collector has a unique bearer token stored in the `collectors.api_token` column in SQLite. The otelcol config sends it as:
 
 ```yaml
 exporters:
   otlphttp/pktsnmp:
-    endpoint: "http://203.0.113.10:8767"
+    endpoint: "http://SERVER-IP:8767"
     headers:
       Authorization: "Bearer <token>"
     tls:
       insecure: true
 ```
 
-Tokens can be rotated from Settings → Collectors → Rotate Token, then re-run the relevant update script.
+Tokens can be rotated from **Settings → Collectors → Rotate Token**, then re-run the relevant update script.
 
 ---
 
@@ -96,7 +89,7 @@ The local collector (collector_id=1) is always running. It:
 - Listens for SNMP traps on UDP 162 (requires `CAP_NET_BIND_SERVICE` — already set in `pktsnmp.service`)
 - Reads its settings from SQLite at startup: `snmp_trap_enabled`, `snmp_poll_enabled`, `snmp_poll_default_interval_seconds`, `snmp_trap_port`
 
-To add a device for local polling, go to Settings → Devices → Add Device and set Collector to `local`.
+To add a device for local polling, go to **Settings → Devices → Add Device** and set Collector to `local`.
 
 ---
 
@@ -114,7 +107,7 @@ To add a device for local polling, go to Settings → Devices → Add Device and
 ```yaml
 exporters:
   otlphttp/pktsnmp:
-    endpoint: "http://203.0.113.10:8767"
+    endpoint: "http://SERVER-IP:8767"
     headers:
       Authorization: "Bearer YOUR_TOKEN_HERE"
     tls:
@@ -128,21 +121,21 @@ Add `otlphttp/pktsnmp` to your SNMP pipeline's exporters list.
 ## Data Flow
 
 ```
-otelcol (medical/dental)
+otelcol collector(s)
   └─ snmp receiver (polls devices every N seconds)
   └─ otlphttp/pktsnmp exporter
        └─ POST /api/snmp/ingest/otlp  (bearer token auth)
             └─ parse_otlp_metrics()
             └─ resolve device_id by otelcol_label
-            └─ DuckDB: INSERT INTO snmp_poll_results
+            └─ SQLite snmp_timeseries.db: INSERT INTO snmp_poll_results
 
-pysnmp local poller (O2, in-process)
+pysnmp local poller (in-process)
   └─ asyncio poll loop → GET per OID per device
-       └─ DuckDB: INSERT INTO snmp_poll_results
+       └─ SQLite snmp_timeseries.db: INSERT INTO snmp_poll_results
 
-asyncio trap receiver (O2, UDP 162)
+asyncio trap receiver (UDP 162)
   └─ decode pysnmp trap
-       └─ DuckDB: INSERT INTO snmp_traps
+       └─ SQLite snmp_timeseries.db: INSERT INTO snmp_traps
 ```
 
 ---
@@ -152,7 +145,7 @@ asyncio trap receiver (O2, UDP 162)
 | Symptom | Check |
 |---|---|
 | Collector status stays "unknown" | Run update script; verify token in SQLite matches otelcol config |
-| No data in DuckDB | `journalctl -u otelcol` on collector; check pktsnmp.log on O2 |
+| No data in time-series DB | Check `journalctl -u otelcol` on collector; check pktsnmp.log on server |
 | 401 on /ingest/otlp | Token mismatch — rotate token and re-run update script |
 | Port 162 bind fails | Verify `AmbientCapabilities=CAP_NET_BIND_SERVICE` in pktsnmp.service; `sudo systemctl daemon-reload && sudo systemctl restart pktsnmp` |
-| otelcol won't restart after update | Script restores backup automatically; check `/mnt/software/otel/config/otelcol-config.yaml.bak` |
+| otelcol won't restart after update | Script restores backup automatically; check the `.bak` file in the otelcol config directory |
