@@ -1,12 +1,20 @@
 #!/usr/bin/env python3
+
+# ── Configuration — update these before running ────────────────────────────
+# SERVER_HOST      = "SERVER-IP"       # pktSNMP server IP or hostname
+# COLLECTOR_1_HOST = "COLLECTOR-1-IP"  # Remote otelcol collector 1
+# SSH_USER         = "ssh-user"        # SSH username on the server
+# SSH_KEY_PATH     = r"PATH\TO\YOUR-KEY.pem"  # SSH private key
+# ──────────────────────────────────────────────────────────────────────────
+
 import os, sys, time, paramiko
 sys.stdout.reconfigure(encoding="utf-8")
-KEY_PATH = r"C:\Users\USER\.ssh\your-key.pem"
+KEY_PATH = r"PATH\TO\YOUR-KEY.pem"
 LOCAL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REMOTE_APP = "/mnt/software/pktsnmp"
 key = paramiko.RSAKey.from_private_key_file(KEY_PATH)
 c = paramiko.SSHClient(); c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-c.connect("203.0.113.10", username="ec2-user", pkey=key, timeout=15)
+c.connect("SERVER-IP", username="ssh-user", pkey=key, timeout=15)
 print("Connected.")
 sftp = c.open_sftp()
 sftp.put(os.path.join(LOCAL_ROOT, "app/database.py"), f"{REMOTE_APP}/app/database.py")

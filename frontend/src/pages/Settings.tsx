@@ -747,7 +747,7 @@ export default function Settings() {
 
           <div className="py-4">
             <p className="text-xs text-blue-400 bg-blue-900/20 border border-blue-700/40 rounded-lg px-3 py-2">
-              Trap receiver and local polling engine settings only. Remote otelcol collectors (medical, dental) operate independently and are managed under <span className="font-semibold">Collectors</span> in the left nav. Changes here take effect after a service restart.
+              Trap receiver and local polling engine settings only. Remote otelcol collectors operate independently and are managed under <span className="font-semibold">Collectors</span> in the left nav. Changes here take effect after a service restart.
             </p>
           </div>
         </Section>
@@ -1384,7 +1384,7 @@ function CredentialFormModal({ cred, onClose, onSaved }: {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="text-xs text-gray-400 block mb-1">Name *</label>
-              <input value={form.name} onChange={e => setF('name', e.target.value)} required placeholder="e.g. v2c-medical, v3-dental-authPriv"
+              <input value={form.name} onChange={e => setF('name', e.target.value)} required placeholder="e.g. v2c-site1, v3-site2-authPriv"
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
             </div>
             <div>
@@ -1397,7 +1397,7 @@ function CredentialFormModal({ cred, onClose, onSaved }: {
           </div>
           <div>
             <label className="text-xs text-gray-400 block mb-1">Description</label>
-            <input value={form.description} onChange={e => setF('description', e.target.value)} placeholder="e.g. Medical v2c read-only"
+            <input value={form.description} onChange={e => setF('description', e.target.value)} placeholder="e.g. Site1 v2c read-only"
               className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
           </div>
 

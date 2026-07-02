@@ -15,7 +15,7 @@ def parse_otlp_metrics(body: dict, collector_id: int) -> list[dict]:
     Parse OTLP HTTP JSON from otelcol snmp receiver.
 
     Metric name format: "SNMP/<SITE>/<DEVICE>/<OID_LABEL>"
-    e.g. "SNMP/SiteA/SW1/ifInOctets"
+    e.g. "SNMP/SITE1/SW1/ifInOctets"
 
     Returns list of normalized poll result dicts.
     """
@@ -29,11 +29,11 @@ def parse_otlp_metrics(body: dict, collector_id: int) -> list[dict]:
                         continue
 
                     # Parse name: strip "SNMP/", split remainder
-                    parts = name[5:].split("/")  # e.g. ["SiteA", "SW1", "ifInOctets"]
+                    parts = name[5:].split("/")  # e.g. ["SITE1", "SW1", "ifInOctets"]
                     if len(parts) < 2:
                         continue
                     oid_label = parts[-1]
-                    device_label = "/".join(parts[:-1])  # e.g. "SiteA/SW1"
+                    device_label = "/".join(parts[:-1])  # e.g. "SITE1/SW1"
 
                     # Determine value type and data points
                     value_type = "gauge"
