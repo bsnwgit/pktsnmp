@@ -31,7 +31,7 @@ def _open_ssh(collector: dict, ssh_key_pem: str | None, ssh_password: str | None
     """Open an SSH connection based on collector config. Returns connected client."""
     host = collector.get("ssh_host") or collector.get("ip") or ""
     port = int(collector.get("ssh_port") or 22)
-    user = collector.get("ssh_user") or "ec2-user"
+    user = collector.get("ssh_user") or "ssh-user"
     auth_type = (collector.get("ssh_auth_type") or "key").lower()
 
     if not host:

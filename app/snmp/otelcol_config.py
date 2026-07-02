@@ -305,7 +305,7 @@ def build_receiver_block(device: dict, credential: dict | None) -> dict:
 
 
 def receiver_name(otelcol_label: str) -> str:
-    """Return the otelcol receiver key for a device label, e.g. 'SiteA/FW3' → 'snmp/SiteA/fw3'."""
+    """Return the otelcol receiver key for a device label, e.g. 'SITE1/FW1' → 'snmp/site1/fw1'."""
     return "snmp/" + otelcol_label.lower()
 
 

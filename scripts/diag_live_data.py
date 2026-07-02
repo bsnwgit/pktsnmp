@@ -1,12 +1,20 @@
 #!/usr/bin/env python3
 """Check whether SNMP poll data is actively being written to the DB right now.
 Takes two snapshots 65 seconds apart (one full poll cycle) and compares last_seen."""
+
+# ── Configuration — update these before running ────────────────────────────
+# SERVER_HOST      = "SERVER-IP"       # pktSNMP server IP or hostname
+# COLLECTOR_1_HOST = "COLLECTOR-1-IP"  # Remote otelcol collector 1
+# SSH_USER         = "ssh-user"        # SSH username on the server
+# SSH_KEY_PATH     = r"PATH\TO\YOUR-KEY.pem"  # SSH private key
+# ──────────────────────────────────────────────────────────────────────────
+
 import paramiko, sys, time
 sys.stdout.reconfigure(encoding="utf-8")
 
-key = paramiko.RSAKey.from_private_key_file(r"C:\Users\USER\.ssh\your-key.pem")
+key = paramiko.RSAKey.from_private_key_file(r"PATH\TO\YOUR-KEY.pem")
 c = paramiko.SSHClient(); c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-c.connect("203.0.113.10", username="ec2-user", pkey=key, timeout=15)
+c.connect("SERVER-IP", username="ssh-user", pkey=key, timeout=15)
 
 def run(cmd):
     _, o, e = c.exec_command(cmd, timeout=30)

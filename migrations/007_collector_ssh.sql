@@ -29,10 +29,10 @@ UPDATE devices SET otelcol_pipeline = 'metrics/firewall' WHERE name LIKE '%FW%' 
 -- AWS devices (dental collector)
 UPDATE devices SET otelcol_pipeline = 'metrics/snmp'     WHERE otelcol_pipeline IS NULL AND collector_id = 3;
 
--- Seed SSH config for known collectors (medical and dental)
-UPDATE collectors SET
-    ssh_user = 'ec2-user',
-    ssh_auth_type = 'key',
-    otelcol_config_path = '/mnt/software/otel/config/otelcol-config.yaml',
-    otelcol_service = 'otelcol'
-WHERE id IN (2, 3);
+-- SSH config for remote collectors — update per your environment via Settings → Collectors.
+-- UPDATE collectors SET
+--     ssh_user = 'ssh-user',
+--     ssh_auth_type = 'key',
+--     otelcol_config_path = '/path/to/otelcol-config.yaml',
+--     otelcol_service = 'otelcol'
+-- WHERE id IN (2, 3);
