@@ -29,7 +29,7 @@ secret_key: "CHANGE_ME_generate_with_openssl_rand_hex_32"
 
 # ── CORS (restrict to your actual origin in production) ──────────────────────
 cors_origins:
-  - "http://203.0.113.10:8767"
+  - "http://SERVER-IP:8767"
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 log_level: "info"

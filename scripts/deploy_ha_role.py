@@ -3,21 +3,29 @@
 deploy_ha_role.py -- Deploy HA role tagging.
 
 Changes:
-  migrations/006_ha_role.sql          -- adds ha_role column, tags SiteA FW3/FW4
+  migrations/006_ha_role.sql          -- adds ha_role column, tags SITE1 FW3/FW4
   app/api/snmp.py                     -- ha_role in SELECT, models, INSERT, UPDATE
   frontend/src/pages/Devices.tsx      -- HA badge + standby status display
 
 Requires frontend rebuild.
 """
+
+# ── Configuration — update these before running ────────────────────────────
+# SERVER_HOST      = "SERVER-IP"       # pktSNMP server IP or hostname
+# COLLECTOR_1_HOST = "COLLECTOR-1-IP"  # Remote otelcol collector 1
+# SSH_USER         = "ssh-user"        # SSH username on the server
+# SSH_KEY_PATH     = r"PATH\TO\YOUR-KEY.pem"  # SSH private key
+# ──────────────────────────────────────────────────────────────────────────
+
 import os, sys, time
 import paramiko
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-HOST       = "203.0.113.10"
+HOST       = "SERVER-IP"
 PORT       = 22
-USER       = "ec2-user"
-KEY_PATH   = r"C:\Users\USER\.ssh\your-key.pem"
+USER       = "ssh-user"
+KEY_PATH   = r"PATH\TO\YOUR-KEY.pem"
 LOCAL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REMOTE_APP = "/mnt/software/pktsnmp"
 SERVICE    = "pktsnmp"
@@ -99,7 +107,7 @@ def main():
         run(ssh, f"journalctl -u {SERVICE} -n 30 --no-pager", check=False)
 
     ssh.close()
-    print(f"\n[deploy] Done. SiteA FW3 = HA active, SiteA FW4 = HA passive (standby badge).")
+    print(f"\n[deploy] Done. SITE1 FW3 = HA active, SITE1 FW4 = HA passive (standby badge).")
 
 if __name__ == "__main__":
     main()

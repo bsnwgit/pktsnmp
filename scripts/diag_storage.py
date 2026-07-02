@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
 """Check DuckDB health, storage backend setting, and device last_seen staleness."""
+
+# ── Configuration — update these before running ────────────────────────────
+# SERVER_HOST      = "SERVER-IP"       # pktSNMP server IP or hostname
+# COLLECTOR_1_HOST = "COLLECTOR-1-IP"  # Remote otelcol collector 1
+# SSH_USER         = "ssh-user"        # SSH username on the server
+# SSH_KEY_PATH     = r"PATH\TO\YOUR-KEY.pem"  # SSH private key
+# ──────────────────────────────────────────────────────────────────────────
+
 import paramiko, sys
 sys.stdout.reconfigure(encoding="utf-8")
 
-KEY_PATH = r"C:\Users\USER\.ssh\your-key.pem"
+KEY_PATH = r"PATH\TO\YOUR-KEY.pem"
 key = paramiko.RSAKey.from_private_key_file(KEY_PATH)
 c = paramiko.SSHClient()
 c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-c.connect("203.0.113.10", username="ec2-user", pkey=key, timeout=15)
+c.connect("SERVER-IP", username="ssh-user", pkey=key, timeout=15)
 
 def run(cmd, label=None):
     if label: print(f"\n=== {label} ===")

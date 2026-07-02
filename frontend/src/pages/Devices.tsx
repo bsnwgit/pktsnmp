@@ -309,7 +309,7 @@ function DeviceFormModal({ device, collectors, credentials, allDevices, hierarch
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="text-xs text-gray-400 block mb-1">otelcol label</label>
-              <input value={form.otelcol_label} onChange={e => setF('otelcol_label', e.target.value)} placeholder="SiteA/SW1"
+              <input value={form.otelcol_label} onChange={e => setF('otelcol_label', e.target.value)} placeholder="SITE/DEVICE"
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:ring-1 focus:ring-blue-500" />
               <p className="text-xs text-gray-500 mt-0.5">Matches SNMP/LABEL in otelcol metric names</p>
             </div>
@@ -407,10 +407,10 @@ export default function Devices() {
   const handleDownloadTemplate = () => {
     const rows = [
       ['name', 'ip', 'org', 'groups', 'site', 'device_type', 'otelcol_label', 'enabled', 'poll_interval_override', 'ha_role', 'collector_name', 'credential_name'],
-      ['Core-FW-01',   '10.0.0.1',  'Example Corp', 'SiteA',      'MDF',   'firewall', 'SiteA/FW1',  'true',  '',   'active',     'Local Collector', 'v2c-public'],
-      ['Core-SW-01',   '10.0.0.2',  'Example Corp', 'SiteA',      'MDF',   'switch',   'SiteA/SW1',  'true',  '60', '',           'Local Collector', 'v2c-public'],
-      ['Access-WAP-01','10.0.1.10', 'Example Corp', 'Branch-A', 'IDF-1', 'wap',      '',         'true',  '',   '',           'Local Collector', 'v3-secure'],
-      ['UPS-Main',     '10.0.2.5',  'Example Corp', 'SiteA',      'MDF',   'ups',      '',         'true',  '',   '',           'Local Collector', 'v2c-public'],
+      ['Core-FW-01',   '10.0.0.1',  'YourOrg', 'Site1',    'MDF',   'firewall', 'SITE1/FW1', 'true',  '',   'active', 'Local Collector', 'v2c-public'],
+      ['Core-SW-01',   '10.0.0.2',  'YourOrg', 'Site1',    'MDF',   'switch',   'SITE1/SW1', 'true',  '60', '',       'Local Collector', 'v2c-public'],
+      ['Access-WAP-01','10.0.1.10', 'YourOrg', 'Branch-A', 'IDF-1', 'wap',      '',          'true',  '',   '',       'Local Collector', 'v3-secure'],
+      ['UPS-Main',     '10.0.2.5',  'YourOrg', 'Site1',    'MDF',   'ups',      '',          'true',  '',   '',       'Local Collector', 'v2c-public'],
     ]
     const csv = rows.map(r => r.map(v => `"${v}"`).join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
