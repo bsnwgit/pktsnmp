@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
-from app.database import init_db
+from app.database import init_db, seed_admin
 from app.storage.factory import init_storage, get_storage
 
 # ── Routers ───────────────────────────────────────────────────────────────────
@@ -45,6 +45,10 @@ async def lifespan(app: FastAPI):
     # Run SQLite migrations
     await init_db()
     log.info("Database migrations applied")
+
+    # Seed initial admin user (Docker first-boot; no-op if users already exist)
+    await seed_admin()
+    log.info("Admin seed check complete")
 
     # Connect to storage backend
     await init_storage()
@@ -197,26 +201,32 @@ if __name__ == "__main__":
     except Exception as _e:
         log.warning(f"Could not read SSL settings from config DB: {_e}")
 
+    # When SSL is on, bind to the HTTPS port; otherwise bind to the HTTP port.
+    _bind_port = settings.https_port if _ssl_enabled else settings.port
+
     _uvicorn_kwargs = dict(
         host=settings.host,
-        port=settings.port,
+        port=_bind_port,
         log_level=settings.log_level.lower(),
         workers=1,
     )
-    # Fall back to the well-known upload paths if DB paths are empty
-    _SSL_DIR   = Path(__file__).parent.parent / "ssl"
-    _CERT_FILE = _SSL_DIR / "server.crt"
-    _KEY_FILE  = _SSL_DIR / "server.key"
-    if not _ssl_certfile and _CERT_FILE.exists():
-        _ssl_certfile = str(_CERT_FILE)
-    if not _ssl_keyfile and _KEY_FILE.exists():
-        _ssl_keyfile = str(_KEY_FILE)
+
+    # SSL cert fallback: check app-relative ssl/ dir AND Docker /data/ssl/
+    _SSL_SEARCH = [
+        Path(__file__).parent.parent / "ssl",
+        Path("/data/ssl"),
+    ]
+    for _ssl_dir in _SSL_SEARCH:
+        if not _ssl_certfile and (_ssl_dir / "server.crt").exists():
+            _ssl_certfile = str(_ssl_dir / "server.crt")
+        if not _ssl_keyfile and (_ssl_dir / "server.key").exists():
+            _ssl_keyfile = str(_ssl_dir / "server.key")
 
     if _ssl_enabled and _ssl_certfile and _ssl_keyfile:
         _uvicorn_kwargs["ssl_certfile"] = _ssl_certfile
         _uvicorn_kwargs["ssl_keyfile"]  = _ssl_keyfile
-        log.info(f"Starting with HTTPS: cert={_ssl_certfile}")
+        log.info(f"Starting with HTTPS on port {_bind_port}: cert={_ssl_certfile}")
     else:
-        log.info("Starting with HTTP (no SSL configured)")
+        log.info(f"Starting with HTTP on port {_bind_port} (no SSL configured)")
 
     uvicorn.run("app.main:app", **_uvicorn_kwargs)

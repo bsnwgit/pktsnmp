@@ -4,6 +4,7 @@ SQLite async database engine for the pktSNMP app sidecar DB
 """
 from __future__ import annotations
 
+import sys
 import aiosqlite
 from pathlib import Path
 from typing import AsyncGenerator
@@ -60,3 +61,42 @@ async def init_db() -> None:
                     "INSERT INTO _migrations (filename) VALUES (?)", (mfile.name,)
                 )
                 await conn.commit()
+
+
+async def seed_admin() -> None:
+    """
+    Create the default admin user on first boot.
+
+    Called by main.py lifespan after init_db().  Reads the plain-text password
+    from PKTSNMP_ADMIN_PASSWORD (set by docker-entrypoint.sh from APP_ADMIN_PASSWORD).
+    If the users table is empty and the password is blank, the process exits
+    with a clear error message so the container fails loudly rather than silently.
+    """
+    _settings = get_settings()
+    admin_password = _settings.admin_password
+
+    async with aiosqlite.connect(DB_PATH) as conn:
+        await conn.execute("PRAGMA journal_mode=WAL")
+        cur = await conn.execute("SELECT COUNT(*) FROM users")
+        row = await cur.fetchone()
+        user_count = row[0] if row else 0
+
+        if user_count > 0:
+            return  # DB already has users — skip seeding
+
+        if not admin_password:
+            print(
+                "\nFATAL: No users exist and PKTSNMP_ADMIN_PASSWORD (APP_ADMIN_PASSWORD) is not set.\n"
+                "       Set APP_ADMIN_PASSWORD to create the initial admin account.\n"
+                "       Example: docker run -e APP_ADMIN_PASSWORD=changeme ...\n",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        from app.auth.local import hash_password
+        hashed = hash_password(admin_password)
+        await conn.execute(
+            "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
+            ("admin", hashed, "admin"),
+        )
+        await conn.commit()

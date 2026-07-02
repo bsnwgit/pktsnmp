@@ -27,6 +27,7 @@ def _load_yaml() -> dict:
     """Try known config file locations and return parsed YAML, or {}."""
     candidates = [
         Path("config.yaml"),
+        Path("/data/config.yaml"),
         Path("/mnt/software/pktsnmp/config.yaml"),
         Path.home() / ".pktsnmp" / "config.yaml",
     ]
@@ -56,8 +57,13 @@ class Settings(BaseSettings):
     # ── Server ────────────────────────────────────────────────────────────────
     host: str = Field(default=_yaml_cfg.get("host", "0.0.0.0"))
     port: int = Field(default=_yaml_cfg.get("port", 8767))
+    https_port: int = Field(default=_yaml_cfg.get("https_port", 443))
     workers: int = Field(default=_yaml_cfg.get("workers", 2))
     debug: bool = Field(default=_yaml_cfg.get("debug", False))
+
+    # ── First-boot admin seed ─────────────────────────────────────────────────
+    # Set by docker-entrypoint.sh from APP_ADMIN_PASSWORD; ignored if DB exists.
+    admin_password: str = Field(default="")
 
     # ── App database (SQLite sidecar) ─────────────────────────────────────────
     db_path: str = Field(
