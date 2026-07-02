@@ -18,10 +18,12 @@ SNMP ingest management and visualization platform — part of the pkt suite. Rec
 - [Upgrading](#upgrading)
 - [Roles & Auth](#roles--auth)
 - [SNMP Settings](#snmp-settings)
+- [SSL/TLS](#ssltls)
 - [Alert Engine](#alert-engine)
 - [Device Hierarchy](#device-hierarchy)
 - [Database Backends](#database-backends)
 - [Backup & Restore](#backup--restore)
+- [pktHub Integration](#pkthub-integration)
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
 
@@ -54,8 +56,8 @@ SNMP ingest management and visualization platform — part of the pkt suite. Rec
          │                        │
 ┌────────────────┐      ┌─────────────────────┐
 │ otelcol        │      │ Network devices      │
-│ (medical host) │      │ (routers, switches,  │
-│ (dental host)  │      │  firewalls)          │
+│ collector(s)   │      │ (routers, switches,  │
+│                │      │  firewalls)          │
 └────────────────┘      └─────────────────────┘
 ```
 
@@ -193,12 +195,12 @@ Runs in-process on O2. Polls all devices assigned to `collector_id=1` via pysnmp
 
 Existing OpenTelemetry Collector instances push OTLP HTTP JSON to pktSNMP.
 
-**Vyne infrastructure:**
+Multiple otelcol instances can be registered, each with a unique bearer token. Example registration:
 
-| Collector | Host | Devices |
+| Collector | Host | Example devices |
 |---|---|---|
-| Medical | COLLECTOR-1-IP | QTS SW1 (v3), QTS FW3/FW4 (v2c), OneNeck SW1/FW1/FW2 (v2c) |
-| Dental | COLLECTOR-2-IP | AWS AZ2A, AWS AZ2B |
+| collector-1 | COLLECTOR-HOST-1 | Core-SW1 (v3), FW1/FW2 (v2c) |
+| collector-2 | COLLECTOR-HOST-2 | Device-A, Device-B |
 
 **Minimal otelcol exporter block:**
 
@@ -361,16 +363,44 @@ Configure via **Settings → SNMP** in the UI.
 
 ---
 
+## SSL/TLS
+
+SSL can be enabled or disabled via **Settings → General → SSL/TLS Toggle** without restarting the service.
+
+| Setting key | Description |
+|---|---|
+| `ssl_enabled` | `true` / `false` — enables HTTPS |
+| `ssl_certfile` | Absolute path to the TLS certificate file (PEM) |
+| `ssl_keyfile` | Absolute path to the TLS private key file (PEM) |
+
+When `ssl_enabled` is `true`, uvicorn binds with the provided cert/key and the service becomes HTTPS-only. When `false`, it binds plain HTTP. Change takes effect after a service restart (`systemctl restart pktsnmp`).
+
+> **SAML note:** The Okta SAML ACS URL must match the scheme (`https://`) set by your TLS configuration. If you toggle SSL, update the ACS URL in Okta accordingly.
+
+---
+
 ## Alert Engine
 
 The alert engine runs as a background task, evaluating all enabled rules every 60 seconds (with a 15-second startup delay).
 
-### Built-in rules
+### Built-in rule types
 
-| Rule | Type | Severity | Default threshold |
-|---|---|---|---|
-| Device unreachable | `device_down` | critical | No data for 10 minutes |
-| Unknown trap source | `unknown_trap_source` | warning | Any trap from unregistered source |
+| Rule type | Severity | Description |
+|---|---|---|
+| `device_unreachable` | critical | Device `last_seen` stale / `status='down'` |
+| `interface_down` | critical | Interface `ifOperStatus` transitions to down |
+| `flapping` | warning | Interface up/down state change exceeds threshold in window |
+| `metric_threshold` | configurable | OID value crosses a static threshold |
+| `metric_spike` | warning | OID value increases by more than N% in one poll cycle |
+| `error_rate` | warning | `ifInErrors` or `ifOutErrors` rate exceeds threshold |
+| `discard_rate` | warning | `ifInDiscards` or `ifOutDiscards` rate exceeds threshold |
+| `high_error_ratio` | warning | Error-to-traffic ratio exceeds configured percentage |
+| `bandwidth_utilization` | configurable | Interface utilization exceeds threshold (% of `ifSpeed`) |
+| `speed_change` | info | `ifSpeed` changes unexpectedly |
+| `collector_gap` | warning | No ingest data received from a collector within window |
+| `trap_received` | info | Any SNMP trap received from a device |
+
+Custom rules are added via **Alerts → Rules** in the UI. Each rule specifies type, device scope, threshold values, severity, cooldown, and notification channels.
 
 ### Behavior
 
@@ -389,7 +419,7 @@ The alert engine runs as a background task, evaluating all enabled rules every 6
 - **Environment card** — red border and tinted header when any device is alerting
 - **Device tree dots** — red pulsing dot on the device and its parent Org/Group/Site nodes
 
-Custom rules are added via the Alerts page. Supported notification channels: `inapp`, `email`, `slack`, `pagerduty`, `webhook`.
+Supported notification channels: `inapp`, `email`, `slack`, `pagerduty`, `webhook`.
 
 ---
 
@@ -456,16 +486,12 @@ Switch backends in **Settings → Storage**.
 
 ## Backup & Restore
 
-### Local project backup (Claude sessions)
+### Local project backup
 
-A local backup script keeps dated .zip copies of the project source between sessions.
+A local backup script keeps dated .zip copies of the project source. The script is `backup.py` in the project root and keeps the last 2 rotations by default.
 
-**Script:** `C:\Users\robert.barnett\My Drive\Documents\Claude\Projects\pktSNMP\backup.py`
-**Backup location:** `C:\Users\robert.barnett\My Drive\Backups\pktSNMP\` (dated .zip files)
-
-Run via Desktop Commander:
-```
-C:\Users\robert.barnett\AppData\Local\Programs\Python\Python313\python.exe "C:\Users\robert.barnett\My Drive\Documents\Claude\Projects\pktSNMP\backup.py"
+```bash
+python backup.py
 ```
 
 ---
@@ -585,11 +611,49 @@ To add a new migration: create `migrations/NNN_your_change.sql` and restart the 
 
 ---
 
+## pktHub Integration
+
+pktSNMP integrates with pktHub (the suite management hub) via a suite token. Once registered, pktHub proxies access to pktSNMP and manages authentication for all managed pktAPP apps.
+
+### Suite token endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/suite/token` | Returns the current suite token (generates one if absent) |
+| `POST` | `/api/suite/regenerate` | Generates a new token, invalidates the old one |
+| `POST` | `/api/suite/register` | Called by pktHub to record registration state |
+
+### Registration steps
+
+1. In pktSNMP, go to **Settings → Integrations → pktHub Integration** and click **Copy Token**
+2. In pktHub, go to **Settings → App Registry → Register App**
+3. Paste the suite token, enter the pktSNMP base URL, and click **Register**
+4. pktHub validates via `/api/health` and stores the token
+5. Optionally flip to **Managed Mode** once proxied access is validated
+
+### Managed mode
+
+In managed mode, every request to pktSNMP must carry the `X-Suite-Token` header. Direct browser access to port 8767 returns `403`. To revert without pktHub access, run the emergency unlock CLI:
+
+```bash
+python app/main.py --emergency-unlock
+```
+
+This removes the suite-token requirement, restores direct access, and logs the event locally.
+
+### Token rotation
+
+Use **Regen** in pktSNMP Settings → Integrations to generate a new token. After regenerating, re-register in pktHub (the old token is immediately invalidated).
+
+---
+
 ## Related projects
 
 | Project | Port | Description |
 |---|---|---|
-| pktFlow | 8760 | NetFlow ingest and visualization (pktSNMP ancestor) |
-| pktDashboard | 8760 | Suite home / logo hosting |
+| pktHub | 8760 | Unified NOC/SOC management hub — registers, proxies, and manages all pktAPP apps |
+| pktFlow | — | NetFlow ingest and visualization (pktSNMP ancestor) |
+| pktLog | — | Syslog ingest and management |
+| pktPCAP | — | Packet capture and analysis |
 
-Logos for all pkt apps are served from `http://SERVER-IP:8760/logos/`.
+Logos for all pkt apps are served from the pktHub `/logos/` endpoint.
