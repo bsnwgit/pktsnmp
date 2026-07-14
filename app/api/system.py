@@ -145,7 +145,7 @@ async def export_bundle():
                 shutil.copy2(str(db), str(tmp_path / "pktsnmp.db"))
 
             # ── config.yaml ──────────────────────────────────────────────────
-            for candidate in [Path("config.yaml"), Path("/mnt/software/pktsnmp/config.yaml")]:
+            for candidate in [Path("config.yaml"), Path("/opt/pktsnmp/config.yaml")]:
                 if candidate.exists():
                     shutil.copy2(str(candidate), str(tmp_path / "config.yaml"))
                     break
@@ -194,8 +194,8 @@ Generated: {ts}
 ## Restore procedure (fresh install)
 1. Deploy pktSNMP to the new server per the README.
 2. Stop the service:     sudo systemctl stop pktsnmp
-3. Copy pktsnmp.db    →  /mnt/software/pktsnmp/pktsnmp.db
-4. Copy config.yaml   →  /mnt/software/pktsnmp/config.yaml
+3. Copy pktsnmp.db    →  /opt/pktsnmp/pktsnmp.db
+4. Copy config.yaml   →  /opt/pktsnmp/config.yaml
 5. Start the service:    sudo systemctl start pktsnmp
 
 ## Restore ClickHouse SNMP data history (if snmp_data.csv.gz is present)
@@ -273,7 +273,7 @@ async def import_bundle(file: UploadFile = File(...)):
 
             # ── config.yaml ───────────────────────────────────────────────────
             cfg_src = tmp_path / "config.yaml"
-            cfg_dest = Path("/mnt/software/pktsnmp/config.yaml")
+            cfg_dest = Path("/opt/pktsnmp/config.yaml")
             if cfg_src.exists():
                 shutil.copy2(str(cfg_src), str(cfg_dest))
                 result["config"] = "restored (restart required)"
@@ -379,7 +379,7 @@ async def test_connection() -> dict:
 
 # ── SSL certificate management ─────────────────────────────────────────────────
 
-_SSL_DIR   = Path("/mnt/software/pktsnmp/ssl")
+_SSL_DIR   = Path("/opt/pktsnmp/ssl")
 _CERT_FILE = _SSL_DIR / "server.crt"
 _KEY_FILE  = _SSL_DIR / "server.key"
 

@@ -1,17 +1,17 @@
 # pktSNMP
 
-SNMP ingest management and visualization platform — part of the pkt suite. Receives SNMP data from remote otelcol collectors and local devices, stores it in SQLite (or ClickHouse), and surfaces it through a React UI with real-time alerting and an AI assistant.
+SNMP ingest management and visualization platform — part of the pkt suite. Receives SNMP data from remote otelcol collectors and local devices, stores it in SQLite (or ClickHouse/DuckDB), and surfaces it through a React UI with real-time alerting and an AI assistant.
 
-**Image:** `ghcr.io/bsnwgit/pktsnmp:latest` &nbsp;|&nbsp; **Default port:** `80` (HTTP) / `443` (HTTPS)
+**Default port:** `8767` (HTTP) — see [SSL/TLS](#ssltls) for HTTPS.
 
 ---
 
 ## Table of Contents
 
-- [Docker Install (Recommended)](#docker-install-recommended)
+- [Quick Start](#quick-start)
 - [Architecture](#architecture)
-- [Prerequisites](#prerequisites)
-- [Fresh Install](#fresh-install)
+- [Requirements](#requirements)
+- [Installation](#installation)
 - [Frontend Build & Deploy](#frontend-build--deploy)
 - [Collector Setup](#collector-setup)
 - [Configuration Reference](#configuration-reference)
@@ -30,94 +30,40 @@ SNMP ingest management and visualization platform — part of the pkt suite. Rec
 
 ---
 
-## Docker Install (Recommended)
-
-pktSNMP is distributed as a single Docker image on GitHub Container Registry.
-
-### Quick start
+## Quick Start
 
 ```bash
-docker run -d \
-  --name pktsnmp \
-  -p 80:80 \
-  -p 162:162/udp \
-  -v pktsnmp-data:/data \
-  -e APP_ADMIN_PASSWORD=changeme \
-  ghcr.io/bsnwgit/pktsnmp:latest
-```
+# 1. Clone the repository
+git clone git@github.com:bsnwgit/pktsnmp.git
+cd pktsnmp
 
-Open `http://YOUR-SERVER-IP` and log in as `admin` / `changeme`.
+# 2. Build the frontend (installer does not do this — see
+#    Frontend Build & Deploy below for why it's a separate step)
+cd frontend && npm ci && npm run build && cd ..
 
-### Docker Compose
+# 3. Run the installer — system packages, Python venv, config.yaml + secret
+#    key, DB migrations, admin user, systemd service (installed + started)
+bash install.sh
 
-```yaml
-services:
-  pktsnmp:
-    image: ghcr.io/bsnwgit/pktsnmp:latest
-    container_name: pktsnmp
-    restart: unless-stopped
-    ports:
-      - "80:80"       # HTTP  — set APP_HTTP_PORT to change the host side
-      - "443:443"     # HTTPS — only used when SSL is enabled in Settings
-      - "162:162/udp" # SNMP trap receiver
-    volumes:
-      - pktsnmp-data:/data
-    environment:
-      APP_ADMIN_PASSWORD: changeme   # Required on first run; ignored after DB exists
-      # APP_SECRET_KEY: ""           # Auto-generated and persisted to /data/.secret_key
-      # APP_HTTP_PORT: 80
-      # APP_HTTPS_PORT: 443
-      # APP_TRAP_PORT: 162
+# Prints the admin password at the end — save it, it is not shown again.
 
-volumes:
-  pktsnmp-data:
+# 4. Open the firewall for the app port (adjust if PKTSNMP_INSTALL_DIR/port differ)
+sudo ufw allow 8767/tcp
+sudo ufw allow 162/udp   # only if using the built-in SNMP trap receiver
+
+# 5. Open http://<server-ip>:8767 and log in with the admin credentials from step 3
 ```
 
 ### Environment variables
 
+`install.sh` honors the following overrides:
+
 | Variable | Default | Description |
 |---|---|---|
-| `APP_ADMIN_PASSWORD` | _(none)_ | **Required on first run.** Creates the `admin` account. Ignored once users exist. |
-| `APP_SECRET_KEY` | _(auto)_ | JWT signing key. Auto-generated and saved to `/data/.secret_key` on first boot. |
-| `APP_HTTP_PORT` | `80` | Port the app listens on when SSL is disabled. |
-| `APP_HTTPS_PORT` | `443` | Port the app listens on when SSL is enabled (configured in Settings → Auth). |
-| `APP_TRAP_PORT` | `162` | UDP port for the SNMP trap receiver. |
-| `PKTSNMP_DB_PATH` | `/data/pktsnmp.db` | SQLite app database path. |
-| `PKTSNMP_DUCKDB_PATH` | `/data/snmp.duckdb` | DuckDB time-series database path. |
-| `PKTSNMP_LOG_FILE` | `/data/logs/pktsnmp.log` | Log file path. |
-
-### Persistent data
-
-All state lives in the `/data` volume:
-
-```
-/data/
-  pktsnmp.db         ← SQLite: settings, users, devices, collectors, alerts
-  snmp.duckdb        ← DuckDB: SNMP time-series (default backend)
-  logs/pktsnmp.log   ← Application log
-  ssl/               ← Drop server.crt + server.key here to enable HTTPS
-  .secret_key        ← Auto-generated JWT signing key (do not delete)
-```
-
-Mount `/data` as a named volume or host directory to retain data across container updates and reboots.
-
-### SSL / HTTPS
-
-1. Place your certificate at `/data/ssl/server.crt` and private key at `/data/ssl/server.key`.
-2. In the UI, go to **Settings → Auth → SSL** and enable SSL.
-3. Restart the container. The app will bind to `APP_HTTPS_PORT` (default `443`) using your cert.
-
-### Updating
-
-```bash
-docker pull ghcr.io/bsnwgit/pktsnmp:latest
-docker stop pktsnmp && docker rm pktsnmp
-# Re-run the same docker run / compose up command — data volume is preserved.
-```
-
-### CI/CD
-
-GitHub Actions automatically builds and pushes the image on every push to `main` (tagged `:latest`) and `feature/docker` (tagged by git SHA). The workflow is at `.github/workflows/docker.yml`.
+| `PKTSNMP_INSTALL_DIR` | `/opt/pktsnmp` | Where the app, venv, and config are installed |
+| `PKTSNMP_LOG_DIR` | `$PKTSNMP_INSTALL_DIR/logs` | Log file directory |
+| `PKTSNMP_SERVICE_USER` | current user | User the systemd service runs as |
+| `PKTSNMP_SERVICE_GROUP` | `$PKTSNMP_SERVICE_USER` | Group the systemd service runs as |
 
 ---
 
@@ -125,7 +71,7 @@ GitHub Actions automatically builds and pushes the image on every push to `main`
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│                        O2 (SERVER-IP)                        │
+│                     pktSNMP host                              │
 │                                                              │
 │   pktsnmp.service  (uvicorn / FastAPI)  :8767                │
 │   ├── REST API  (app/api/)                                   │
@@ -134,13 +80,13 @@ GitHub Actions automatically builds and pushes the image on every push to `main`
 │   ├── Alert engine        (60s loop, fires + resolves)       │
 │   └── AI assistant        (Anthropic)                        │
 │                                                              │
-│   SQLite  pktsnmp.db         ← settings, users, devices,    │
-│                                 collectors, alert rules,     │
-│                                 alert events, notif log      │
-│   SQLite  snmp_timeseries.db ← snmp_traps, snmp_poll_results│
-│   (or ClickHouse — switchable in Settings → Storage)         │
+│   SQLite  pktsnmp.db          ← settings, users, devices,    │
+│                                  collectors, alert rules,     │
+│                                  alert events, notif log      │
+│   SQLite  snmp_timeseries.db  ← snmp_traps, snmp_poll_results│
+│   (or DuckDB / ClickHouse — switchable in Settings → Storage) │
 │                                                              │
-│   React SPA  /mnt/software/pktsnmp/frontend/dist/           │
+│   React SPA  frontend/dist/                                  │
 │   served by uvicorn StaticFiles                              │
 └──────────────────────────────────────────────────────────────┘
          ▲                        ▲
@@ -159,7 +105,7 @@ GitHub Actions automatically builds and pushes the image on every push to `main`
 |---|---|
 | Backend | FastAPI + aiosqlite (Python 3.11+) |
 | App database | SQLite `pktsnmp.db` (settings, devices, alerts) |
-| Time-series store | SQLite `snmp_timeseries.db` (default) or ClickHouse |
+| Time-series store | SQLite `snmp_timeseries.db` (default) or DuckDB / ClickHouse |
 | Frontend | React 18 + TypeScript + Tailwind CSS + Vite |
 | Auth | JWT (15 min) + httpOnly refresh (7 days) + Okta SAML 2.0 |
 | SNMP | pysnmp-lextudio (v1/v2c/v3 traps and polling) |
@@ -167,107 +113,129 @@ GitHub Actions automatically builds and pushes the image on every push to `main`
 
 ---
 
-## Prerequisites
+## Requirements
 
-**On O2 (server):**
+- Ubuntu Server 22.04 or 24.04 LTS
 - Python 3.11+
-- Node.js 20+ via NVM (for frontend builds)
-- Git
-- Optional: ClickHouse (if switching storage backend)
+- Node.js 20+ (for building the frontend — see [Frontend Build & Deploy](#frontend-build--deploy))
+- `sudo` access (installer creates the install directory, a systemd unit, and installs apt packages)
 
-**On your Windows workstation:**
-- Python 3.x + Paramiko (`pip install paramiko`)
-- SSH key `your-key.pem` in a known path
-- **Do not install Node on Windows** — the `node_modules` tree is OS-specific; builds must run on O2
+The installer (`install.sh`) installs the remaining system packages: `libssl-dev`, `libffi-dev` (for `cryptography`), and `libxmlsec1-dev`, `libxmlsec1-openssl`, `libxml2-dev`, `pkg-config`, `gcc` (for `python3-saml`, used by Okta SAML SSO).
+
+Optional: ClickHouse, if you plan to switch the time-series storage backend for very high-volume environments (see [Database Backends](#database-backends)). Not required for a default install.
 
 ---
 
-## Fresh Install
+## Installation
 
-### 1 — Clone the repo on O2
+### 1 — Clone the repository
 
 ```bash
-ssh -i your-key.pem ssh-user@SERVER-IP
-cd /mnt/software
-git clone git@github.com:bsnwgit/pktsnmp.git pktsnmp
+git clone git@github.com:bsnwgit/pktsnmp.git
 cd pktsnmp
 ```
 
-### 2 — Python virtual environment
+### 2 — Build the frontend
+
+The frontend must be built before (or right after) running the installer — `install.sh` copies `frontend/dist/` into the install directory if it exists, but does not build it. See [Frontend Build & Deploy](#frontend-build--deploy).
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
+cd frontend
+npm ci
+npm run build
+cd ..
 ```
 
-### 3 — Configuration
+### 3 — Run the installer
 
 ```bash
-cp config.example.yaml config.yaml
+bash install.sh
 ```
 
-Edit `config.yaml` at minimum:
+This performs, in order:
 
-```yaml
-# Generate a strong secret key:
-#   openssl rand -hex 32
-secret_key: "PASTE_OUTPUT_HERE"
+1. Installs system packages (Python, build tools, `libssl-dev`/`libffi-dev`, `libxmlsec1`/`libxml2` for SAML)
+2. Creates the install directory (`/opt/pktsnmp` by default) and log directory
+3. Creates a Python virtualenv and installs `requirements.txt`
+4. Copies `app/`, `migrations/`, and `frontend/dist/` into the install directory
+5. Creates `config.yaml` from `config.example.yaml`, generating a random `secret_key`
+6. Applies database migrations and creates the initial `admin` user (prints the generated password once)
+7. Confirms the frontend build is present
+8. Installs and starts the `pktsnmp` systemd service (substituting install dir / log dir / user / group into the unit template)
 
-db_path: "/mnt/software/pktsnmp/pktsnmp.db"
-log_file: "/mnt/software/logs/pktsnmp.log"
-```
-
-### 4 — Database migrations
-
-Migrations run automatically at startup. To apply manually:
+### 4 — Open the firewall
 
 ```bash
-source venv/bin/activate
-python -c "from app.database import run_migrations; import asyncio; asyncio.run(run_migrations())"
+sudo ufw allow 8767/tcp
+sudo ufw allow 162/udp   # only if using the built-in SNMP trap receiver
 ```
 
-### 5 — Systemd service
+### 5 — Verify and log in
 
 ```bash
-sudo cp pktsnmp.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable pktsnmp
-sudo systemctl start pktsnmp
 sudo systemctl status pktsnmp
+curl -s http://localhost:8767/api/health
 ```
 
-### 6 — Build & deploy the frontend
+Navigate to `http://<server-ip>:8767` and log in with the admin credentials printed by the installer. **Change the password immediately** in Settings → Users.
 
-See [Frontend Build & Deploy](#frontend-build--deploy) below.
+### Re-running the installer
 
-### 7 — First login
+`install.sh` is safe to re-run — it skips steps that are already complete (existing `config.yaml`, already-applied migrations, existing admin user). Use this to pick up an updated `frontend/dist/` after a rebuild, or to re-install the systemd unit after editing `pktsnmp.service`.
 
-Navigate to `http://SERVER-IP:8767` and log in with the default admin credentials set during installation. **Change the password immediately** in Settings → Users.
+### Manual install (without install.sh)
+
+If you'd rather not use the installer:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y python3 python3-venv python3-pip \
+    libssl-dev libffi-dev libxmlsec1-dev libxmlsec1-openssl libxml2-dev pkg-config gcc
+
+sudo mkdir -p /opt/pktsnmp/logs
+sudo chown "$(whoami):$(whoami)" /opt/pktsnmp /opt/pktsnmp/logs
+
+python3 -m venv /opt/pktsnmp/venv
+/opt/pktsnmp/venv/bin/pip install -r requirements.txt
+
+cp -r app migrations /opt/pktsnmp/
+cp -r frontend/dist /opt/pktsnmp/frontend/dist   # after building the frontend
+
+cp config.example.yaml /opt/pktsnmp/config.yaml
+# Edit /opt/pktsnmp/config.yaml — set secret_key (openssl rand -hex 32),
+# db_path, duckdb_path, log_file, cors_origins
+
+PKTSNMP_CONFIG=/opt/pktsnmp/config.yaml PKTSNMP_ADMIN_PASSWORD=changeme \
+    /opt/pktsnmp/venv/bin/python3 -c \
+    "import asyncio; from app.database import init_db, seed_admin; asyncio.run(init_db()); asyncio.run(seed_admin())"
+
+sed -e "s#__INSTALL_DIR__#/opt/pktsnmp#g" -e "s#__LOG_DIR__#/opt/pktsnmp/logs#g" \
+    -e "s#__SERVICE_USER__#$(whoami)#g" -e "s#__SERVICE_GROUP__#$(whoami)#g" \
+    pktsnmp.service | sudo tee /etc/systemd/system/pktsnmp.service > /dev/null
+sudo systemctl daemon-reload
+sudo systemctl enable --now pktsnmp
+```
 
 ---
 
 ## Frontend Build & Deploy
 
-The frontend **must be built on O2** — the `node_modules` directory contains Linux-native binaries that won't cross-compile from Windows.
-
-### Automated (recommended)
-
-From your Windows workstation, run the appropriate deploy script from `scripts/`. Each script uploads changed files and triggers an NVM-aware build + service restart via Paramiko.
-
-### Manual (on O2)
+The frontend is a standard Vite/React build — no special runtime requirements beyond Node.js 20+:
 
 ```bash
-cd /mnt/software/pktsnmp/frontend
-source ~/.nvm/nvm.sh
-nvm use 20
+cd frontend
 npm ci
 npm run build
+```
+
+The built output lands in `frontend/dist/` and is served by FastAPI's `StaticFiles` mount. After a rebuild, copy it into the install directory and restart the service:
+
+```bash
+cp -r frontend/dist /opt/pktsnmp/frontend/dist
 sudo systemctl restart pktsnmp
 ```
 
-The built output lands in `frontend/dist/` and is served by FastAPI's `StaticFiles` mount.
+Or re-run `bash install.sh`, which copies `frontend/dist/` if present and restarts the service.
 
 ---
 
@@ -277,7 +245,7 @@ pktSNMP receives SNMP data two ways:
 
 ### Local collector (built-in)
 
-Runs in-process on O2. Polls all devices assigned to `collector_id=1` via pysnmp, and listens for raw SNMP traps on UDP 162.
+Runs in-process on the pktSNMP host. Polls all devices assigned to `collector_id=1` via pysnmp, and listens for raw SNMP traps on UDP 162.
 
 - Requires `AmbientCapabilities=CAP_NET_BIND_SERVICE` (already set in `pktsnmp.service`)
 - Configure via **Settings → SNMP**: enable trap receiver, set poll interval
@@ -287,12 +255,7 @@ Runs in-process on O2. Polls all devices assigned to `collector_id=1` via pysnmp
 
 Existing OpenTelemetry Collector instances push OTLP HTTP JSON to pktSNMP.
 
-Multiple otelcol instances can be registered, each with a unique bearer token. Example registration:
-
-| Collector | Host | Example devices |
-|---|---|---|
-| collector-1 | COLLECTOR-HOST-1 | Core-SW1 (v3), FW1/FW2 (v2c) |
-| collector-2 | COLLECTOR-HOST-2 | Device-A, Device-B |
+Multiple otelcol instances can be registered, each with a unique bearer token — generated and rotated in **Settings → Collectors**. See `docs/collector-setup.md` for the full redirect/registration walkthrough.
 
 **Minimal otelcol exporter block:**
 
@@ -304,7 +267,6 @@ exporters:
       Authorization: "Bearer YOUR_TOKEN_HERE"
     tls:
       insecure: true
-    timeout: 30s
 ```
 
 > **Note:** otelcol automatically appends `/v1/metrics` to the endpoint. The actual POST hits `/api/snmp/ingest/otlp/v1/metrics`. Both paths are registered.
@@ -313,7 +275,7 @@ exporters:
 
 ```
 SNMP/<SITE>/<DEVICE>/<OID_LABEL>
-e.g. SNMP/SiteA/SW1/ifInOctets
+e.g. SNMP/SITE1/SW1/ifInOctets
 ```
 
 Metrics not prefixed with `SNMP/` are ignored.
@@ -348,11 +310,11 @@ All startup/infrastructure settings live in `config.yaml`. Runtime settings (sto
 | `port` | `8767` | HTTP port |
 | `workers` | `2` | uvicorn workers |
 | `secret_key` | — | JWT signing secret — **must change** |
-| `db_path` | `/mnt/software/pktsnmp/pktsnmp.db` | SQLite control-plane DB |
+| `db_path` | `/opt/pktsnmp/pktsnmp.db` | SQLite control-plane DB |
 | `clickhouse_host` | `localhost` | ClickHouse host (if switching storage) |
 | `clickhouse_database` | `pktsnmp` | ClickHouse database name |
 | `log_level` | `info` | `debug` / `info` / `warning` / `error` |
-| `log_file` | `/mnt/software/logs/pktsnmp.log` | Log output path |
+| `log_file` | `/opt/pktsnmp/logs/pktsnmp.log` | Log output path |
 | `cors_origins` | `["http://SERVER-IP:8767"]` | Allowed CORS origins |
 
 ### SNMP settings (stored in SQLite, managed via UI)
@@ -367,7 +329,7 @@ All startup/infrastructure settings live in `config.yaml`. Runtime settings (sto
 | `snmp_community` | Community string (v1/v2c) |
 | `snmp_v3_auth_key` | SNMPv3 auth key (stored masked) |
 | `snmp_v3_priv_key` | SNMPv3 privacy key (stored masked) |
-| `storage_backend` | `"sqlite"` (default) / `"clickhouse"` |
+| `storage_backend` | `"sqlite"` (default) / `"duckdb"` / `"clickhouse"` |
 
 ---
 
@@ -380,7 +342,7 @@ sudo systemctl status pktsnmp
 # Logs (live)
 sudo journalctl -u pktsnmp -f
 # or
-tail -f /mnt/software/logs/pktsnmp.log
+tail -f /opt/pktsnmp/logs/pktsnmp.log
 
 # Restart
 sudo systemctl restart pktsnmp
@@ -394,21 +356,14 @@ sudo systemctl start pktsnmp
 
 ## Upgrading
 
-From your Windows workstation, run the appropriate deploy script. Or manually on O2:
-
 ```bash
-cd /mnt/software/pktsnmp
+cd pktsnmp
 git pull
-source venv/bin/activate
-pip install -r requirements.txt   # if requirements changed
-cd frontend
-source ~/.nvm/nvm.sh && nvm use 20
-npm ci
-npm run build
-sudo systemctl restart pktsnmp
+cd frontend && npm ci && npm run build && cd ..
+bash install.sh   # re-applies migrations, updates frontend/dist, restarts the service
 ```
 
-Migrations run automatically on startup. No manual schema steps needed unless noted in the migration file comments.
+Migrations run automatically on startup and are safe to re-run — the migration runner tracks applied files and skips duplicates.
 
 ---
 
@@ -426,7 +381,7 @@ Three roles: `admin`, `analyst`, `viewer`.
 
 ### Local auth
 
-Default admin is created by the install script. Password is changed via Settings → Users or the key icon in the sidebar.
+The default admin user is created by `install.sh` (or `seed_admin()` in a manual install). Password is changed via Settings → Users or the key icon in the sidebar.
 
 ### Okta SAML 2.0
 
@@ -465,7 +420,7 @@ SSL can be enabled or disabled via **Settings → General → SSL/TLS Toggle** w
 | `ssl_certfile` | Absolute path to the TLS certificate file (PEM) |
 | `ssl_keyfile` | Absolute path to the TLS private key file (PEM) |
 
-When `ssl_enabled` is `true`, uvicorn binds with the provided cert/key and the service becomes HTTPS-only. When `false`, it binds plain HTTP. Change takes effect after a service restart (`systemctl restart pktsnmp`).
+When `ssl_enabled` is `true`, uvicorn binds with the provided cert/key and the service becomes HTTPS-only. When `false`, it binds plain HTTP. Change takes effect after a service restart (`sudo systemctl restart pktsnmp`).
 
 > **SAML note:** The Okta SAML ACS URL must match the scheme (`https://`) set by your TLS configuration. If you toggle SSL, update the ACS URL in Okta accordingly.
 
@@ -542,7 +497,7 @@ The Dashboard **Environment** card displays the full hierarchy. Status dots on O
 | Device type | `router` / `switch` / `firewall` / `server` / `wireless` / `ups` / `other` |
 | Org / Group / Site | Hierarchy assignment |
 | Collector | Which collector polls this device |
-| `otelcol_label` | Path prefix used to match OTLP metrics (e.g. `SiteA/SW1`) |
+| `otelcol_label` | Path prefix used to match OTLP metrics (e.g. `SITE1/SW1`) |
 | HA role | `standalone` / `active` / `standby` |
 | HA peer | Links to the paired HA device |
 | Community / SNMP version | Per-device credential override |
@@ -560,14 +515,19 @@ Switch backends in **Settings → Storage**.
 ### SQLite (default)
 
 - Zero-config, embedded, no separate service
-- Control-plane DB: `/mnt/software/pktsnmp/pktsnmp.db`
-- Time-series DB: `/mnt/software/pktsnmp/snmp_timeseries.db`
+- Control-plane DB: `/opt/pktsnmp/pktsnmp.db`
+- Time-series DB: `/opt/pktsnmp/snmp_timeseries.db`
 - Tables: `snmp_traps`, `snmp_poll_results`
 - Suitable for most deployments
 
+### DuckDB
+
+- Embedded, no separate service — single-file analytical database
+- Path configured via `duckdb_path` in `config.yaml`
+
 ### ClickHouse
 
-- Requires a running ClickHouse server
+- Requires a running ClickHouse server (not installed by `install.sh`)
 - Database: `pktsnmp`, table: `snmp_data`
 - Set credentials in `config.yaml`
 - Better for very high-volume environments or long-term retention at scale
@@ -586,33 +546,29 @@ A local backup script keeps dated .zip copies of the project source. The script 
 python backup.py
 ```
 
----
-
 ### Automated backup
 
 Configure schedule and retention in **Settings → Backup**, or trigger immediately via the UI or:
 
 ```bash
-# From the API
 curl -X POST http://SERVER-IP:8767/api/system/backup -H "Authorization: Bearer TOKEN"
 ```
 
-Backups are stored in `/mnt/software/pktsnmp_backups/`.
+Backups are stored in `/opt/pktsnmp/backups/`.
 
 ### Manual backup
 
 ```bash
-# On O2 (stop service first for snmp_timeseries.db if writes are active)
-cp /mnt/software/pktsnmp/pktsnmp.db /mnt/software/pktsnmp_backups/pktsnmp_$(date +%Y%m%d_%H%M%S).db
-cp /mnt/software/pktsnmp/snmp_timeseries.db /mnt/software/pktsnmp_backups/snmp_timeseries_$(date +%Y%m%d_%H%M%S).db
+cp /opt/pktsnmp/pktsnmp.db /opt/pktsnmp/backups/pktsnmp_$(date +%Y%m%d_%H%M%S).db
+cp /opt/pktsnmp/snmp_timeseries.db /opt/pktsnmp/backups/snmp_timeseries_$(date +%Y%m%d_%H%M%S).db
 ```
 
 ### Restore
 
 ```bash
 sudo systemctl stop pktsnmp
-cp /mnt/software/pktsnmp_backups/pktsnmp_<timestamp>.db /mnt/software/pktsnmp/pktsnmp.db
-cp /mnt/software/pktsnmp_backups/snmp_timeseries_<timestamp>.db /mnt/software/pktsnmp/snmp_timeseries.db
+cp /opt/pktsnmp/backups/pktsnmp_<timestamp>.db /opt/pktsnmp/pktsnmp.db
+cp /opt/pktsnmp/backups/snmp_timeseries_<timestamp>.db /opt/pktsnmp/snmp_timeseries.db
 sudo systemctl start pktsnmp
 ```
 
@@ -623,12 +579,12 @@ sudo systemctl start pktsnmp
 | Symptom | Check |
 |---|---|
 | Service won't start | `journalctl -u pktsnmp -n 50`; check `config.yaml` paths and `secret_key` |
-| Port 162 bind fails | Verify `AmbientCapabilities=CAP_NET_BIND_SERVICE` in the service file; `systemctl daemon-reload && systemctl restart pktsnmp` |
+| Port 162 bind fails | Verify `AmbientCapabilities=CAP_NET_BIND_SERVICE` in the service file; `sudo systemctl daemon-reload && sudo systemctl restart pktsnmp` |
 | No data from otelcol | `journalctl -u otelcol` on collector host; check bearer token matches SQLite; verify `otelcol_label` on device record matches metric path prefix |
 | 401 on `/ingest/otlp` | Token mismatch — rotate token in Collectors and update otelcol config |
 | Collector status "unknown" | Collector hasn't pushed data yet; check otelcol is running and endpoint is reachable |
 | `devices.last_seen` not updating | Verify `otelcol_label` on device matches SNMP metric path; check ingest endpoint returns 202 |
-| Frontend blank / 404 | Build didn't complete; check `frontend/dist/` exists; rebuild with deploy script |
+| Frontend blank / 404 | Build didn't complete; check `frontend/dist/` exists; rebuild and re-run `install.sh` |
 | Alert fires but dot still green | Alert engine evaluates every 60s; wait one cycle. If persists, check `devices.status` in SQLite directly |
 | Storage backend wrong on startup | `storage_backend` setting in SQLite takes effect on next restart; restart the service |
 | ClickHouse not found | Verify ClickHouse is running: `systemctl status clickhouse-server`; check credentials in `config.yaml` |
@@ -666,7 +622,7 @@ pktsnmp/
 │   ├── auth/         # Local JWT + Okta SAML handlers
 │   ├── alerts/       # Alert engine (real, 60s loop) + cleanup
 │   ├── snmp/         # Trap receiver, poll engine, OTLP parser, OID catalog
-│   ├── storage/      # SQLite time-series, ClickHouse backends, factory
+│   ├── storage/      # SQLite time-series, DuckDB, ClickHouse backends, factory
 │   ├── models/       # Pydantic models
 │   ├── backup.py
 │   ├── config.py
@@ -681,25 +637,20 @@ pktsnmp/
 │       ├── store/    # auth, autoRefresh
 │       └── api/      # typed API client (client.ts)
 ├── migrations/       # SQLite schema migrations (auto-applied at startup, append-only)
-├── scripts/          # Deployment + diagnostic scripts (Paramiko-based, Windows → O2)
 ├── config.example.yaml
 ├── requirements.txt
-├── pktsnmp.service
+├── install.sh        # Ubuntu bare-metal installer
+├── pktsnmp.service   # systemd unit template (placeholders filled in by install.sh)
 └── backup.py
 ```
+
+Deployment/diagnostic scripts specific to a given environment belong in a local, untracked `scripts/` directory (already covered by `.gitignore`) — they are not part of this repository.
 
 ### Migrations
 
 Migration files live in `migrations/` and are named `NNN_description.sql`. They are applied in filename order at startup. The runner tracks applied migrations in a `_migrations` table and skips already-applied files. It also silently ignores `duplicate column name` errors so migrations are safe to re-run after partial failures.
 
 To add a new migration: create `migrations/NNN_your_change.sql` and restart the service.
-
-### Deployment notes
-
-- **Never build the frontend on Windows** — `node_modules` contains Linux-native rollup binaries
-- **Use Paramiko scripts, not `ssh.exe`** — SentinelOne EDR blocks the Windows SSH client on this machine
-- **One script run, no retry loops** — repeated SSH connections can lock the server and require a reboot
-- **NVM required on O2** — prefix all `npm` commands with `export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh"`
 
 ---
 
