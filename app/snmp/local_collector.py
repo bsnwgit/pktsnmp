@@ -1,5 +1,5 @@
 """
-Local collector -- in-process trap receiver and poll engine for pktSNMP O2.
+Local collector -- in-process trap receiver and poll engine for pktSNMP.
 Devices assigned to collector_id=1 are handled here.
 """
 from __future__ import annotations

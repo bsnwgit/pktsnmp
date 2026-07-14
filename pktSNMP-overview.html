@@ -420,20 +420,20 @@
            ROW 2: Collection Layer
       ════════════════════════════════════════ -->
 
-      <!-- otelcol Medical -->
+      <!-- otelcol Collector A -->
       <rect x="60" y="195" width="160" height="108" rx="10" fill="#162032" stroke="#3b82f6" stroke-width="1.5"/>
       <text x="140" y="217" text-anchor="middle" fill="#3b82f6" font-size="10" font-weight="700" letter-spacing="1">OTELCOL</text>
-      <text x="140" y="233" text-anchor="middle" fill="#e2e8f0" font-size="11" font-weight="700">Medical</text>
-      <text x="140" y="249" text-anchor="middle" fill="#7c8ea8" font-size="10">203.0.113.11</text>
+      <text x="140" y="233" text-anchor="middle" fill="#e2e8f0" font-size="11" font-weight="700">Collector A</text>
+      <text x="140" y="249" text-anchor="middle" fill="#7c8ea8" font-size="10">10.0.1.11</text>
       <rect x="75" y="258" width="110" height="17" rx="3" fill="#0f1625"/>
       <text x="130" y="270" text-anchor="middle" fill="#7c8ea8" font-size="9" font-family="monospace">snmp receiver → OTLP</text>
       <text x="140" y="292" text-anchor="middle" fill="#7c8ea8" font-size="9">gzip · 576 metrics/batch</text>
 
-      <!-- otelcol Dental -->
+      <!-- otelcol Collector B -->
       <rect x="244" y="195" width="160" height="108" rx="10" fill="#162032" stroke="#3b82f6" stroke-width="1.5"/>
       <text x="324" y="217" text-anchor="middle" fill="#3b82f6" font-size="10" font-weight="700" letter-spacing="1">OTELCOL</text>
-      <text x="324" y="233" text-anchor="middle" fill="#e2e8f0" font-size="11" font-weight="700">Dental</text>
-      <text x="324" y="249" text-anchor="middle" fill="#7c8ea8" font-size="10">203.0.113.12</text>
+      <text x="324" y="233" text-anchor="middle" fill="#e2e8f0" font-size="11" font-weight="700">Collector B</text>
+      <text x="324" y="249" text-anchor="middle" fill="#7c8ea8" font-size="10">10.0.2.20</text>
       <rect x="259" y="258" width="110" height="17" rx="3" fill="#0f1625"/>
       <text x="314" y="270" text-anchor="middle" fill="#7c8ea8" font-size="9" font-family="monospace">snmp receiver → OTLP</text>
       <text x="324" y="292" text-anchor="middle" fill="#7c8ea8" font-size="9">gzip · 576 metrics/batch</text>
@@ -462,7 +462,7 @@
 
       <!-- pktSNMP Core box -->
       <rect x="60" y="355" width="780" height="118" rx="12" fill="#0f1625" stroke="#00c9a7" stroke-width="2"/>
-      <text x="450" y="378" text-anchor="middle" fill="#00c9a7" font-size="11" font-weight="700" letter-spacing="1.5">pktSNMP CORE · FastAPI + uvicorn · O2 · :8767</text>
+      <text x="450" y="378" text-anchor="middle" fill="#00c9a7" font-size="11" font-weight="700" letter-spacing="1.5">pktSNMP CORE · FastAPI + uvicorn · :8767</text>
 
       <!-- Ingest API -->
       <rect x="80" y="388" width="135" height="70" rx="7" fill="#162032" stroke="#1e2e48"/>
@@ -526,11 +526,11 @@
            ARROWS
       ════════════════════════════════════════ -->
 
-      <!-- Devices → otelcol Medical (SNMP GET) -->
+      <!-- Devices → otelcol Collector A (SNMP GET) -->
       <line x1="115" y1="153" x2="115" y2="193" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arr-b)"/>
       <line x1="250" y1="153" x2="250" y2="193" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arr-b)"/>
 
-      <!-- Devices → otelcol Dental -->
+      <!-- Devices → otelcol Collector B -->
       <line x1="385" y1="153" x2="355" y2="193" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arr-b)"/>
       <line x1="520" y1="153" x2="490" y2="193" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arr-b)"/>
 

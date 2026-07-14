@@ -18,7 +18,7 @@ log = logging.getLogger("pktsnmp.storage.duckdb")
 
 
 class DuckDBStorage(StorageBase):
-    def __init__(self, db_path: str = "/mnt/software/pktsnmp/snmp.duckdb") -> None:
+    def __init__(self, db_path: str = "/opt/pktsnmp/snmp.duckdb") -> None:
         self.db_path = db_path
         self._conn = None
         self._lock = asyncio.Lock()
