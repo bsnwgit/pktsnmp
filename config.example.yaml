@@ -12,17 +12,17 @@ workers: 2
 debug: false
 
 # ── SQLite app database ────────────────────────────────────────────────────────
-db_path: "/mnt/software/pktsnmp/pktsnmp.db"
+db_path: "/opt/pktsnmp/pktsnmp.db"
 
-# ── ClickHouse ────────────────────────────────────────────────────────────────
+# ── ClickHouse (optional — only used if storage_backend is switched to "clickhouse") ──
 clickhouse_host: "localhost"
 clickhouse_port: 9000
 clickhouse_database: "pktsnmp"
 clickhouse_user: "default"
 clickhouse_password: ""
 
-# ── DuckDB (default backend) ──────────────────────────────────────────────────
-duckdb_path: "/mnt/software/pktsnmp/snmp.duckdb"
+# ── DuckDB (optional alternate backend; SQLite is the default) ───────────────
+duckdb_path: "/opt/pktsnmp/snmp.duckdb"
 
 # ── JWT (CHANGE THIS in production — generate with: openssl rand -hex 32) ────
 secret_key: "CHANGE_ME_generate_with_openssl_rand_hex_32"
@@ -33,4 +33,4 @@ cors_origins:
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 log_level: "info"
-log_file: "/mnt/software/logs/pktsnmp.log"
+log_file: "/opt/pktsnmp/logs/pktsnmp.log"

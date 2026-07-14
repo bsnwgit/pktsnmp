@@ -1,17 +1,21 @@
+# Template — install.sh substitutes __INSTALL_DIR__ / __LOG_DIR__ /
+# __SERVICE_USER__ / __SERVICE_GROUP__ before installing to systemd.
+# For a manual install, replace these placeholders yourself.
 [Unit]
 Description=pktSNMP SNMP Ingest Management & Visualization Platform
-Documentation=https://github.com/vynedental/pktsnmp
-After=network.target clickhouse-server.service
+Documentation=https://github.com/bsnwgit/pktsnmp
+After=network.target
 
 [Service]
 Type=simple
-User=ec2-user
-Group=ec2-user
-WorkingDirectory=/mnt/software/pktsnmp
+User=__SERVICE_USER__
+Group=__SERVICE_GROUP__
+WorkingDirectory=__INSTALL_DIR__
 
-Environment=PKTSNMP_CONFIG=/mnt/software/pktsnmp/config.yaml
+Environment=PKTSNMP_CONFIG=__INSTALL_DIR__/config.yaml
+Environment=PKTSNMP_INSTALL_DIR=__INSTALL_DIR__
 
-ExecStart=/mnt/software/pktsnmp/venv/bin/uvicorn app.main:app \
+ExecStart=__INSTALL_DIR__/venv/bin/uvicorn app.main:app \
     --host 0.0.0.0 \
     --port 8767 \
     --workers 1 \
@@ -23,8 +27,8 @@ RestartSec=5
 StartLimitInterval=60
 StartLimitBurst=3
 
-StandardOutput=append:/mnt/software/logs/pktsnmp.log
-StandardError=append:/mnt/software/logs/pktsnmp.log
+StandardOutput=append:__LOG_DIR__/pktsnmp.log
+StandardError=append:__LOG_DIR__/pktsnmp.log
 
 NoNewPrivileges=yes
 AmbientCapabilities=CAP_NET_BIND_SERVICE
