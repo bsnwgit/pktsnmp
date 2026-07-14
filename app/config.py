@@ -3,7 +3,7 @@ pktSNMP configuration.
 
 Priority order (highest → lowest):
   1. Environment variables  (PKTSNMP_*)
-  2. config.yaml in CWD or /mnt/software/pktsnmp/
+  2. config.yaml in CWD, $PKTSNMP_INSTALL_DIR, /data, /opt/pktsnmp, or ~/.pktsnmp
   3. Defaults defined here
 
 Runtime settings (storage backend, retention days, SNMP settings, etc.) are
@@ -28,9 +28,13 @@ def _load_yaml() -> dict:
     candidates = [
         Path("config.yaml"),
         Path("/data/config.yaml"),
-        Path("/mnt/software/pktsnmp/config.yaml"),
+        Path("/opt/pktsnmp/config.yaml"),
         Path.home() / ".pktsnmp" / "config.yaml",
     ]
+    install_dir = os.environ.get("PKTSNMP_INSTALL_DIR")
+    if install_dir:
+        candidates.insert(0, Path(install_dir) / "config.yaml")
+
     env_path = os.environ.get("PKTSNMP_CONFIG")
     if env_path:
         candidates.insert(0, Path(env_path))
@@ -67,7 +71,7 @@ class Settings(BaseSettings):
 
     # ── App database (SQLite sidecar) ─────────────────────────────────────────
     db_path: str = Field(
-        default=_yaml_cfg.get("db_path", "/mnt/software/pktsnmp/pktsnmp.db")
+        default=_yaml_cfg.get("db_path", "/opt/pktsnmp/pktsnmp.db")
     )
 
     # ── ClickHouse (startup connection — overridable at runtime via settings) ──
@@ -79,7 +83,7 @@ class Settings(BaseSettings):
 
     # ── DuckDB (alternate backend) ────────────────────────────────────────────
     duckdb_path: str = Field(
-        default=_yaml_cfg.get("duckdb_path", "/mnt/software/pktsnmp/snmp.duckdb")
+        default=_yaml_cfg.get("duckdb_path", "/opt/pktsnmp/snmp.duckdb")
     )
 
     # ── JWT ───────────────────────────────────────────────────────────────────
@@ -101,7 +105,7 @@ class Settings(BaseSettings):
     # ── Logging ───────────────────────────────────────────────────────────────
     log_level: str = Field(default=_yaml_cfg.get("log_level", "info"))
     log_file: str = Field(
-        default=_yaml_cfg.get("log_file", "/mnt/software/logs/pktsnmp.log")
+        default=_yaml_cfg.get("log_file", "/opt/pktsnmp/logs/pktsnmp.log")
     )
 
 

@@ -20,8 +20,8 @@ Status key: ⬜ not started · 🔄 in progress · ✅ complete
 ✅ Dashboard stub  
 ✅ Alerts stub  
 ✅ AI Assistant panel (Claude, gated on anthropic_api_key)  
-✅ deploy_frontend.py (Paramiko SSH, O2 build)  
-✅ backup.py (Windows 2-rotation zip)  
+✅ install.sh (Ubuntu bare-metal installer)  
+✅ backup.py (local 2-rotation zip)  
 
 ---
 
