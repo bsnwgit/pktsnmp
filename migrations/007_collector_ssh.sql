@@ -26,7 +26,7 @@ ALTER TABLE devices ADD COLUMN otelcol_pipeline TEXT;
 -- Seed pipeline for existing devices based on name patterns
 UPDATE devices SET otelcol_pipeline = 'metrics/switch'   WHERE name LIKE '%SW%';
 UPDATE devices SET otelcol_pipeline = 'metrics/firewall' WHERE name LIKE '%FW%' OR name LIKE '%fw%';
--- AWS devices (dental collector)
+-- Devices behind collector_id=3
 UPDATE devices SET otelcol_pipeline = 'metrics/snmp'     WHERE otelcol_pipeline IS NULL AND collector_id = 3;
 
 -- SSH config for remote collectors — update per your environment via Settings → Collectors.

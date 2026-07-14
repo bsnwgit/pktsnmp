@@ -104,7 +104,7 @@ DEFAULTS: dict[str, Any] = {
     "backup_enabled": False,
     "backup_interval_hours": 24,
     "backup_rotation_count": 5,
-    "backup_path": "/mnt/software/pktsnmp_backups",
+    "backup_path": "/opt/pktsnmp/backups",
     "backup_include_clickhouse": True,
 }
 
