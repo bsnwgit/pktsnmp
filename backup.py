@@ -10,7 +10,7 @@ Usage:
     python backup.py [--dest D:\Backups\pktSNMP]
 
 Defaults:
-    --dest  C:\Users\robert.barnett\My Drive\Backups\pktSNMP
+    --dest  <home directory>/My Drive/Backups/pktSNMP
 """
 
 import argparse
