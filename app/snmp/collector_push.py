@@ -120,7 +120,7 @@ def preview_config(collector: dict, devices_with_creds: list[dict],
 
     ssh = _open_ssh(collector, ssh_key_pem, ssh_password)
     try:
-        config_path = collector.get("otelcol_config_path") or "/mnt/software/otel/config/otelcol-config.yaml"
+        config_path = collector.get("otelcol_config_path") or "/etc/otelcol-contrib/config.yaml"
         sftp = ssh.open_sftp()
         with sftp.open(config_path, "r") as f:
             raw = f.read()
@@ -149,7 +149,7 @@ def push_config(
     """
     from app.snmp.otelcol_config import patch_config, config_to_yaml
 
-    config_path   = collector.get("otelcol_config_path") or "/mnt/software/otel/config/otelcol-config.yaml"
+    config_path   = collector.get("otelcol_config_path") or "/etc/otelcol-contrib/config.yaml"
     service_name  = collector.get("otelcol_service") or "otelcol"
     backup_path   = config_path + ".pktsnmp_bak"
 

@@ -1,18 +1,25 @@
 #!/bin/bash
 # pktSNMP install script — Ubuntu Server 22.04/24.04 LTS
 # Usage: bash install.sh
-# Override defaults with env vars, e.g.:
+# Prompts for the install directory (default /opt/pktsnmp) when run interactively.
+# Override defaults with env vars to skip the prompt, e.g.:
 #   PKTSNMP_INSTALL_DIR=/opt/pktsnmp PKTSNMP_SERVICE_USER=pktsnmp bash install.sh
 
 set -euo pipefail
 
-INSTALL_DIR="${PKTSNMP_INSTALL_DIR:-/opt/pktsnmp}"
+if [ -z "${PKTSNMP_INSTALL_DIR:-}" ] && [ -t 0 ]; then
+    read -rp "Install directory [/opt/pktsnmp]: " INSTALL_DIR_INPUT
+    INSTALL_DIR="${INSTALL_DIR_INPUT:-/opt/pktsnmp}"
+else
+    INSTALL_DIR="${PKTSNMP_INSTALL_DIR:-/opt/pktsnmp}"
+fi
 LOG_DIR="${PKTSNMP_LOG_DIR:-$INSTALL_DIR/logs}"
 SERVICE_USER="${PKTSNMP_SERVICE_USER:-$(whoami)}"
 SERVICE_GROUP="${PKTSNMP_SERVICE_GROUP:-$SERVICE_USER}"
 VENV="$INSTALL_DIR/venv"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$SCRIPT_DIR"
+LOCAL_IP="$(hostname -I | awk '{print $1}')"
 
 echo "=== pktSNMP Installer ==="
 echo "Install dir: $INSTALL_DIR"
@@ -45,11 +52,12 @@ echo "  Python dependencies installed."
 
 # ── 4. Copy application files ─────────────────────────────────────────────────
 echo "[4/8] Copying application files..."
-cp -r "$REPO_DIR/app"          "$INSTALL_DIR/"
-cp -r "$REPO_DIR/migrations"   "$INSTALL_DIR/"
-mkdir -p "$INSTALL_DIR/frontend"
-cp -r "$REPO_DIR/frontend/dist" "$INSTALL_DIR/frontend/dist" 2>/dev/null || \
-    echo "  NOTE: frontend/dist not found — build it first (see README § Frontend Build & Deploy)"
+if [ "$REPO_DIR" = "$INSTALL_DIR" ]; then
+    echo "  Install dir is the repo checkout itself — nothing to copy."
+else
+    cp -r "$REPO_DIR/app"        "$INSTALL_DIR/"
+    cp -r "$REPO_DIR/migrations" "$INSTALL_DIR/"
+fi
 
 # ── 5. Configure ──────────────────────────────────────────────────────────────
 echo "[5/8] Setting up config..."
@@ -58,8 +66,10 @@ if [ ! -f "$INSTALL_DIR/config.yaml" ]; then
     # Generate a random secret key
     SECRET=$(openssl rand -hex 32)
     sed -i "s/CHANGE_ME_generate_with_openssl_rand_hex_32/$SECRET/" "$INSTALL_DIR/config.yaml"
-    sed -i "s#/opt/pktsnmp#$INSTALL_DIR#g" "$INSTALL_DIR/config.yaml"
-    sed -i "s#http://SERVER-IP:8767#http://$(hostname -I | awk '{print $1}'):8767#g" "$INSTALL_DIR/config.yaml"
+    sed -i "s#http://SERVER-IP:8767#http://$LOCAL_IP:8767#g" "$INSTALL_DIR/config.yaml"
+    # Pin install_dir explicitly (app/config.py derives every other path —
+    # db, logs, ssl, backups — from this by default).
+    echo "install_dir: \"$INSTALL_DIR\"" >> "$INSTALL_DIR/config.yaml"
     echo "  Config created at $INSTALL_DIR/config.yaml"
     echo "  !! Review and update cors_origins before production use !!"
 else
@@ -87,11 +97,25 @@ async def setup():
 asyncio.run(setup())
 PYEOF
 
-# ── 7. Build the frontend (if not already built) ─────────────────────────────
-echo "[7/8] Frontend..."
-if [ ! -d "$INSTALL_DIR/frontend/dist" ]; then
-    echo "  frontend/dist not present — see README § Frontend Build & Deploy to build it,"
-    echo "  then re-run this script (it will skip steps already completed)."
+# ── 7. Build frontend ─────────────────────────────────────────────────────────
+# Not installing Node.js itself here (see README Requirements — version
+# management is left to the operator), but if it's already present, just
+# build it — there's no reason to leave this as a manual step when we can.
+echo "[7/8] Building frontend..."
+FRONTEND_BUILT=0
+if command -v npm &>/dev/null; then
+    ( cd "$REPO_DIR/frontend" && npm install --no-audit --no-fund && npm run build )
+    mkdir -p "$INSTALL_DIR/frontend"
+    if [ "$REPO_DIR/frontend/dist" != "$INSTALL_DIR/frontend/dist" ]; then
+        rm -rf "$INSTALL_DIR/frontend/dist"
+        cp -r "$REPO_DIR/frontend/dist" "$INSTALL_DIR/frontend/dist"
+    fi
+    FRONTEND_BUILT=1
+    echo "  Frontend built and deployed."
+else
+    echo "  npm not found — skipping (Node.js is required; see README Requirements)."
+    echo "  The web UI will return \"Not Found\" until you build it manually — see the"
+    echo "  banner at the end of this script for the exact commands."
 fi
 
 # ── 8. Install systemd service ────────────────────────────────────────────────
@@ -112,13 +136,23 @@ echo ""
 echo "╔══════════════════════════════════════════════════════════╗"
 echo "║             pktSNMP installed successfully!               ║"
 echo "╠══════════════════════════════════════════════════════════╣"
-printf "║  URL:           http://%-35s║\n" "$(hostname -I | awk '{print $1}'):8767"
+printf "║  URL:           http://%-35s║\n" "$LOCAL_IP:8767"
 echo "║  Username:      admin                                    ║"
 printf "║  Password:      %-43s║\n" "$ADMIN_PASS"
 echo "║                                                          ║"
 echo "║  SAVE THESE CREDENTIALS — they won't be shown again!     ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo ""
+if [ "$FRONTEND_BUILT" -eq 0 ]; then
+    echo "!! Frontend was NOT built (npm not found) — the web UI will show"
+    echo "!! {\"detail\":\"Not Found\"} until you run:"
+    echo "!!   cd $REPO_DIR/frontend && npm install && npm run build"
+    if [ "$REPO_DIR/frontend/dist" != "$INSTALL_DIR/frontend/dist" ]; then
+        echo "!!   mkdir -p $INSTALL_DIR/frontend && cp -r $REPO_DIR/frontend/dist $INSTALL_DIR/frontend/dist"
+    fi
+    echo "!!   sudo systemctl restart pktsnmp"
+    echo ""
+fi
 echo "Next steps:"
 echo "  1. Open the firewall for TCP 8767 (and UDP 162 if using the trap receiver)"
 echo "  2. Log in and change the admin password in Settings → Users"

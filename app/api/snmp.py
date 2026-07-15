@@ -203,7 +203,7 @@ class CollectorSSHUpdate(BaseModel):
     ssh_auth_type: str = "key"              # 'key' | 'password'
     ssh_key: str | None = None              # PEM text — encrypted at rest, never returned
     ssh_password: str | None = None        # plaintext — encrypted at rest, never returned
-    otelcol_config_path: str = "/mnt/software/otel/config/otelcol-config.yaml"
+    otelcol_config_path: str = "/etc/otelcol-contrib/config.yaml"
     otelcol_service: str = "otelcol"
 
 
