@@ -99,7 +99,7 @@ function SSHModal({ collector, onClose, onSaved }: {
     keyText: '',
     passwordMode: pwdHasSaved ? 'keep' : 'new',
     passwordText: '',
-    otelcol_config_path: collector.otelcol_config_path ?? '/mnt/software/otel/config/otelcol-config.yaml',
+    otelcol_config_path: collector.otelcol_config_path ?? '/etc/otelcol-contrib/config.yaml',
     otelcol_service: collector.otelcol_service ?? 'otelcol',
   })
 
