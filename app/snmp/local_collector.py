@@ -21,12 +21,17 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("pktsnmp.snmp.local_collector")
 
+# id of the built-in local collector row seeded by migrations/002_phase2.sql
+LOCAL_COLLECTOR_ID = 1
+_HEARTBEAT_INTERVAL_SECONDS = 60
+
 
 class LocalCollector:
     def __init__(self, alert_engine: "AlertEngine | None" = None) -> None:
         self._alert_engine = alert_engine
         self._trap_receiver: TrapReceiver | None = None
         self._poll_engine: PollEngine | None = None
+        self._heartbeat_task: asyncio.Task | None = None
         self._trap_enabled: bool = False
         self._poll_enabled: bool = False
         self._db_path: str = ""
@@ -59,6 +64,16 @@ class LocalCollector:
             )
             await self._poll_engine.start(db_path)
 
+        # The `collectors` table's last_seen/status (and the effective_status the UI
+        # shows) are otherwise only ever updated by the bearer-token-authenticated
+        # OTLP ingest/heartbeat endpoints remote otelcol collectors call over HTTP —
+        # the in-process local collector never calls those, so without this it always
+        # displays as offline even while actively polling/receiving traps.
+        if self._trap_enabled or self._poll_enabled:
+            self._heartbeat_task = asyncio.create_task(
+                self._heartbeat_loop(), name="local_collector_heartbeat"
+            )
+
         log.info(
             f"Local collector started -- trap={self._trap_enabled}, poll={self._poll_enabled}"
         )
@@ -68,7 +83,27 @@ class LocalCollector:
             await self._trap_receiver.stop()
         if self._poll_engine:
             await self._poll_engine.stop()
+        if self._heartbeat_task:
+            self._heartbeat_task.cancel()
+            try:
+                await self._heartbeat_task
+            except asyncio.CancelledError:
+                pass
         log.info("Local collector stopped")
+
+    async def _heartbeat_loop(self) -> None:
+        while True:
+            try:
+                async with aiosqlite.connect(self._db_path) as db:
+                    await db.execute(
+                        "UPDATE collectors SET last_seen=datetime('now'), status='online', "
+                        "updated_at=datetime('now') WHERE id=?",
+                        (LOCAL_COLLECTOR_ID,),
+                    )
+                    await db.commit()
+            except Exception as e:
+                log.debug(f"Local collector heartbeat error: {e}")
+            await asyncio.sleep(_HEARTBEAT_INTERVAL_SECONDS)
 
     def signal_reload(self) -> None:
         if self._poll_engine:
