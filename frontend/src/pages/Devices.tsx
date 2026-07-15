@@ -398,7 +398,11 @@ export default function Devices() {
 
   const deleteDevice = async (d: Device) => {
     try {
-      await fetch(`/api/snmp/devices/${d.id}`, { method: 'DELETE', headers: authHeader() })
+      const res = await fetch(`/api/snmp/devices/${d.id}`, { method: 'DELETE', headers: authHeader() })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.detail || `HTTP ${res.status}`)
+      }
       setConfirm(null)
       await load()
     } catch (e: any) { setError(e.message) }

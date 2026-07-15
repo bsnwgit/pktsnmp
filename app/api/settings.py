@@ -131,6 +131,13 @@ async def _ensure_defaults(db: aiosqlite.Connection) -> None:
     await db.commit()
 
 
+def _safe_loads(raw: str):
+    try:
+        return json.loads(raw)
+    except (ValueError, TypeError):
+        return raw  # tolerate a legacy/non-JSON-encoded value rather than 500ing the whole page
+
+
 @router.get("/")
 async def get_all_settings(_: AdminUser, db: aiosqlite.Connection = Depends(get_db)):
     """Return all settings as a flat dict. Sensitive values are masked."""
@@ -138,7 +145,7 @@ async def get_all_settings(_: AdminUser, db: aiosqlite.Connection = Depends(get_
     async with db.execute("SELECT key, value FROM settings") as cur:
         rows = await cur.fetchall()
 
-    result = {r[0]: json.loads(r[1]) for r in rows}
+    result = {r[0]: _safe_loads(r[1]) for r in rows}
 
     # Mask secrets in API response
     for secret_key in _SECRET_KEYS:
@@ -154,7 +161,7 @@ async def get_setting(key: str, _: AdminUser, db: aiosqlite.Connection = Depends
         row = await cur.fetchone()
     if not row:
         raise HTTPException(status_code=404, detail=f"Setting '{key}' not found")
-    return {key: json.loads(row[0])}
+    return {key: _safe_loads(row[0])}
 
 
 class SettingUpdate(BaseModel):

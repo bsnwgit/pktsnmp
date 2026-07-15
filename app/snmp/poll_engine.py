@@ -120,7 +120,7 @@ class PollEngine:
             ObjectType,
             ObjectIdentity,
             usmHMACSHAAuthProtocol,
-            usmHMACSHA256AuthProtocol,
+            usmHMAC192SHA256AuthProtocol,
             usmAesCfb128Protocol,
         )
 
@@ -135,7 +135,7 @@ class PollEngine:
             if device["snmp_version"] == "v3":
                 auth_protocol_name = (device.get("auth_protocol") or "SHA256").upper()
                 auth_proto = (
-                    usmHMACSHA256AuthProtocol
+                    usmHMAC192SHA256AuthProtocol
                     if "256" in auth_protocol_name
                     else usmHMACSHAAuthProtocol
                 )
