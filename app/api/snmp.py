@@ -1050,6 +1050,10 @@ async def delete_device(device_id: int, _: AdminUser, db: aiosqlite.Connection =
         row = await cur.fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Device not found")
+    # alert_events.device_id has no ON DELETE action (unlike parent_device_id/ha_peer_id,
+    # which are SET NULL) — clear it first so historical alert events survive the device
+    # being removed instead of blocking the delete with a FK constraint violation.
+    await db.execute("UPDATE alert_events SET device_id=NULL WHERE device_id=?", (device_id,))
     await db.execute("DELETE FROM devices WHERE id=?", (device_id,))
     await db.commit()
     _signal_reload()
@@ -1060,12 +1064,14 @@ async def test_device(device_id: int, _: AnalystUser, db: aiosqlite.Connection =
     db.row_factory = aiosqlite.Row
     async with db.execute(
         """SELECT d.id, d.ip,
-               COALESCE(c.snmp_version, 'v2c') AS snmp_version,
-               COALESCE(c.community, 'public') AS community,
-               COALESCE(c.security_name, '') AS security_name,
-               COALESCE(c.security_level, 'noAuthNoPriv') AS security_level,
-               COALESCE(c.auth_protocol, 'SHA256') AS auth_protocol,
-               c.auth_key_enc, c.priv_key_enc
+               COALESCE(NULLIF(d.snmp_version, ''), c.snmp_version, 'v2c') AS snmp_version,
+               COALESCE(NULLIF(d.community, ''), c.community, 'public') AS community,
+               COALESCE(NULLIF(d.security_name, ''), c.security_name, '') AS security_name,
+               COALESCE(NULLIF(d.security_level, ''), c.security_level, 'noAuthNoPriv') AS security_level,
+               COALESCE(NULLIF(d.auth_protocol, ''), c.auth_protocol, 'SHA256') AS auth_protocol,
+               COALESCE(d.auth_key_enc, c.auth_key_enc) AS auth_key_enc,
+               COALESCE(NULLIF(d.priv_protocol, ''), c.priv_protocol, 'AES128') AS priv_protocol,
+               COALESCE(d.priv_key_enc, c.priv_key_enc) AS priv_key_enc
            FROM devices d
            LEFT JOIN snmp_credentials c ON c.id = d.credential_id
            WHERE d.id=?""",
@@ -1079,7 +1085,7 @@ async def test_device(device_id: int, _: AnalystUser, db: aiosqlite.Connection =
         from pysnmp.hlapi.asyncio import (
             getCmd, SnmpEngine, CommunityData, UsmUserData,
             UdpTransportTarget, ContextData, ObjectType, ObjectIdentity,
-            usmHMACSHAAuthProtocol, usmHMACSHA256AuthProtocol, usmAesCfb128Protocol,
+            usmHMACSHAAuthProtocol, usmHMAC192SHA256AuthProtocol, usmAesCfb128Protocol,
         )
         engine = SnmpEngine()
         target = UdpTransportTarget((device["ip"], 161), timeout=5, retries=1)
@@ -1087,7 +1093,7 @@ async def test_device(device_id: int, _: AnalystUser, db: aiosqlite.Connection =
         if device["snmp_version"] == "v3":
             auth_key = _decrypt(device["auth_key_enc"]) if device.get("auth_key_enc") else None
             priv_key = _decrypt(device["priv_key_enc"]) if device.get("priv_key_enc") else None
-            auth_proto = usmHMACSHA256AuthProtocol if "256" in (device.get("auth_protocol") or "SHA256") else usmHMACSHAAuthProtocol
+            auth_proto = usmHMAC192SHA256AuthProtocol if "256" in (device.get("auth_protocol") or "SHA256") else usmHMACSHAAuthProtocol
             auth_data = UsmUserData(device.get("security_name") or "", authKey=auth_key, privKey=priv_key,
                                      authProtocol=auth_proto, privProtocol=usmAesCfb128Protocol)
         else:
