@@ -37,21 +37,19 @@ SNMP ingest management and visualization platform — part of the pkt suite. Rec
 git clone git@github.com:bsnwgit/pktsnmp.git
 cd pktsnmp
 
-# 2. Build the frontend (installer does not do this — see
-#    Frontend Build & Deploy below for why it's a separate step)
-cd frontend && npm ci && npm run build && cd ..
-
-# 3. Run the installer — system packages, Python venv, config.yaml + secret
-#    key, DB migrations, admin user, systemd service (installed + started)
+# 2. Run the installer — prompts for an install directory (default /opt/pktsnmp),
+#    then handles system packages, Python venv, config.yaml + secret key, DB
+#    migrations, admin user, frontend build (if npm is present), and the
+#    systemd service (installed + started)
 bash install.sh
 
 # Prints the admin password at the end — save it, it is not shown again.
 
-# 4. Open the firewall for the app port (adjust if PKTSNMP_INSTALL_DIR/port differ)
+# 3. Open the firewall for the app port (adjust if PKTSNMP_INSTALL_DIR/port differ)
 sudo ufw allow 8767/tcp
 sudo ufw allow 162/udp   # only if using the built-in SNMP trap receiver
 
-# 5. Open http://<server-ip>:8767 and log in with the admin credentials from step 3
+# 4. Open http://<server-ip>:8767 and log in with the admin credentials from step 2
 ```
 
 ### Environment variables
@@ -135,42 +133,31 @@ git clone git@github.com:bsnwgit/pktsnmp.git
 cd pktsnmp
 ```
 
-### 2 — Build the frontend
-
-The frontend must be built before (or right after) running the installer — `install.sh` copies `frontend/dist/` into the install directory if it exists, but does not build it. See [Frontend Build & Deploy](#frontend-build--deploy).
-
-```bash
-cd frontend
-npm ci
-npm run build
-cd ..
-```
-
-### 3 — Run the installer
+### 2 — Run the installer
 
 ```bash
 bash install.sh
 ```
 
-This performs, in order:
+Prompts for an install directory (default `/opt/pktsnmp`) if run interactively; set `PKTSNMP_INSTALL_DIR` to skip the prompt (see [Environment variables](#environment-variables)). Performs, in order:
 
 1. Installs system packages (Python, build tools, `libssl-dev`/`libffi-dev`, `libxmlsec1`/`libxml2` for SAML)
-2. Creates the install directory (`/opt/pktsnmp` by default) and log directory
+2. Creates the install directory and log directory
 3. Creates a Python virtualenv and installs `requirements.txt`
-4. Copies `app/`, `migrations/`, and `frontend/dist/` into the install directory
-5. Creates `config.yaml` from `config.example.yaml`, generating a random `secret_key`
+4. Copies `app/` and `migrations/` into the install directory (skipped if installing in-place, i.e. the install directory is the repo checkout itself)
+5. Creates `config.yaml` from `config.example.yaml`, generating a random `secret_key` and pinning `install_dir` — every other on-disk path (`db_path`, `duckdb_path`, `log_file`, `ssl_dir`, backups) defaults to somewhere under `install_dir` unless explicitly overridden
 6. Applies database migrations and creates the initial `admin` user (prints the generated password once)
-7. Confirms the frontend build is present
+7. Builds and deploys the frontend automatically if `npm` is on `PATH`; otherwise prints the exact manual build command to run afterward — see [Frontend Build & Deploy](#frontend-build--deploy)
 8. Installs and starts the `pktsnmp` systemd service (substituting install dir / log dir / user / group into the unit template)
 
-### 4 — Open the firewall
+### 3 — Open the firewall
 
 ```bash
 sudo ufw allow 8767/tcp
 sudo ufw allow 162/udp   # only if using the built-in SNMP trap receiver
 ```
 
-### 5 — Verify and log in
+### 4 — Verify and log in
 
 ```bash
 sudo systemctl status pktsnmp
@@ -181,7 +168,11 @@ Navigate to `http://<server-ip>:8767` and log in with the admin credentials prin
 
 ### Re-running the installer
 
-`install.sh` is safe to re-run — it skips steps that are already complete (existing `config.yaml`, already-applied migrations, existing admin user). Use this to pick up an updated `frontend/dist/` after a rebuild, or to re-install the systemd unit after editing `pktsnmp.service`.
+`install.sh` is safe to re-run — it skips steps that are already complete (existing `config.yaml`, already-applied migrations, existing admin user). Use this to pick up a code update, rebuild the frontend, or re-install the systemd unit after editing `pktsnmp.service`.
+
+### Installing in-place (repo checkout as install dir)
+
+If the install directory you choose (or `PKTSNMP_INSTALL_DIR`) is the repo checkout itself, `install.sh` skips the file-copy step rather than failing — it runs directly against `app/`, `migrations/`, etc. in the checkout.
 
 ### Manual install (without install.sh)
 
@@ -202,8 +193,10 @@ cp -r app migrations /opt/pktsnmp/
 cp -r frontend/dist /opt/pktsnmp/frontend/dist   # after building the frontend
 
 cp config.example.yaml /opt/pktsnmp/config.yaml
-# Edit /opt/pktsnmp/config.yaml — set secret_key (openssl rand -hex 32),
-# db_path, duckdb_path, log_file, cors_origins
+# Edit /opt/pktsnmp/config.yaml — set secret_key (openssl rand -hex 32), cors_origins.
+# db_path, duckdb_path, log_file, and ssl_dir don't need to be set — they default to
+# somewhere under install_dir. Pin install_dir explicitly so they resolve correctly:
+echo 'install_dir: "/opt/pktsnmp"' >> /opt/pktsnmp/config.yaml
 
 PKTSNMP_CONFIG=/opt/pktsnmp/config.yaml PKTSNMP_ADMIN_PASSWORD=changeme \
     /opt/pktsnmp/venv/bin/python3 -c \
@@ -304,17 +297,22 @@ SNMP trap (UDP 162)  →  decode trap
 
 All startup/infrastructure settings live in `config.yaml`. Runtime settings (storage backend, SNMP credentials, retention, notifications) are managed in the UI and stored in SQLite.
 
+`install_dir` is the app root — `db_path`, `duckdb_path`, `log_file`, and `ssl_dir` all default to somewhere under it and don't need to be set explicitly (the defaults below assume the default `/opt/pktsnmp` install dir). Override any individual one in `config.yaml` if it needs to live somewhere else.
+
 | Key | Default | Description |
 |---|---|---|
 | `host` | `0.0.0.0` | Bind address |
 | `port` | `8767` | HTTP port |
 | `workers` | `2` | uvicorn workers |
 | `secret_key` | — | JWT signing secret — **must change** |
-| `db_path` | `/opt/pktsnmp/pktsnmp.db` | SQLite control-plane DB |
+| `install_dir` | detected at runtime | App root — pinned by `install.sh`; every path below defaults relative to this |
+| `db_path` | `<install_dir>/pktsnmp.db` | SQLite control-plane DB |
+| `duckdb_path` | `<install_dir>/snmp.duckdb` | DuckDB time-series file (if backend switched to DuckDB) |
 | `clickhouse_host` | `localhost` | ClickHouse host (if switching storage) |
 | `clickhouse_database` | `pktsnmp` | ClickHouse database name |
 | `log_level` | `info` | `debug` / `info` / `warning` / `error` |
-| `log_file` | `/opt/pktsnmp/logs/pktsnmp.log` | Log output path |
+| `log_file` | `<install_dir>/logs/pktsnmp.log` | Log output path |
+| `ssl_dir` | `<install_dir>/ssl` | Directory holding `server.crt` / `server.key` |
 | `cors_origins` | `["http://SERVER-IP:8767"]` | Allowed CORS origins |
 
 ### SNMP settings (stored in SQLite, managed via UI)

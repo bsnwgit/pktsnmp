@@ -46,7 +46,7 @@ async def lifespan(app: FastAPI):
     await init_db()
     log.info("Database migrations applied")
 
-    # Seed initial admin user (Docker first-boot; no-op if users already exist)
+    # Seed initial admin user (first boot only; no-op if users already exist)
     await seed_admin()
     log.info("Admin seed check complete")
 
@@ -211,16 +211,13 @@ if __name__ == "__main__":
         workers=1,
     )
 
-    # SSL cert fallback: check app-relative ssl/ dir AND Docker /data/ssl/
-    _SSL_SEARCH = [
-        Path(__file__).parent.parent / "ssl",
-        Path("/data/ssl"),
-    ]
-    for _ssl_dir in _SSL_SEARCH:
-        if not _ssl_certfile and (_ssl_dir / "server.crt").exists():
-            _ssl_certfile = str(_ssl_dir / "server.crt")
-        if not _ssl_keyfile and (_ssl_dir / "server.key").exists():
-            _ssl_keyfile = str(_ssl_dir / "server.key")
+    # SSL cert fallback: check settings.ssl_dir (where the UI's cert
+    # upload/PFX-extract endpoints write server.crt/server.key)
+    _ssl_dir = Path(settings.ssl_dir)
+    if not _ssl_certfile and (_ssl_dir / "server.crt").exists():
+        _ssl_certfile = str(_ssl_dir / "server.crt")
+    if not _ssl_keyfile and (_ssl_dir / "server.key").exists():
+        _ssl_keyfile = str(_ssl_dir / "server.key")
 
     if _ssl_enabled and _ssl_certfile and _ssl_keyfile:
         _uvicorn_kwargs["ssl_certfile"] = _ssl_certfile

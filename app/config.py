@@ -3,8 +3,17 @@ pktSNMP configuration.
 
 Priority order (highest → lowest):
   1. Environment variables  (PKTSNMP_*)
-  2. config.yaml in CWD, $PKTSNMP_INSTALL_DIR, /data, /opt/pktsnmp, or ~/.pktsnmp
+  2. config.yaml — found via $PKTSNMP_CONFIG, $PKTSNMP_INSTALL_DIR/config.yaml,
+     ./config.yaml, or ~/.pktsnmp/config.yaml
   3. Defaults defined here
+
+No path in this file is hardcoded to a specific install location. Every
+on-disk path (db_path, duckdb_path, log_file, ssl_dir, ...) defaults to
+somewhere under `install_dir` — the directory install.sh (or
+$PKTSNMP_INSTALL_DIR) was pointed at — so the app works the same whether
+it's installed at /opt/pktsnmp, in-place in a repo checkout, or anywhere
+else. Override any individual path in config.yaml if you need it to live
+somewhere other than install_dir.
 
 Runtime settings (storage backend, retention days, SNMP settings, etc.) are
 stored in SQLite and loaded via SettingsStore; those are NOT in this file.
@@ -16,24 +25,20 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Optional
 
 import yaml
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-def _load_yaml() -> dict:
-    """Try known config file locations and return parsed YAML, or {}."""
-    candidates = [
-        Path("config.yaml"),
-        Path("/data/config.yaml"),
-        Path("/opt/pktsnmp/config.yaml"),
-        Path.home() / ".pktsnmp" / "config.yaml",
-    ]
+def _find_config_path() -> Optional[Path]:
+    """Try known config file locations, in priority order."""
+    candidates = [Path("config.yaml")]
     install_dir = os.environ.get("PKTSNMP_INSTALL_DIR")
     if install_dir:
         candidates.insert(0, Path(install_dir) / "config.yaml")
+    candidates.append(Path.home() / ".pktsnmp" / "config.yaml")
 
     env_path = os.environ.get("PKTSNMP_CONFIG")
     if env_path:
@@ -41,12 +46,30 @@ def _load_yaml() -> dict:
 
     for path in candidates:
         if path.exists():
-            with path.open() as f:
-                return yaml.safe_load(f) or {}
-    return {}
+            return path
+    return None
 
 
-_yaml_cfg = _load_yaml()
+def _load_yaml(path: Optional[Path]) -> dict:
+    if path is None:
+        return {}
+    with path.open() as f:
+        return yaml.safe_load(f) or {}
+
+
+def _default_install_dir(config_path: Optional[Path]) -> Path:
+    """The app root: everything else defaults to a path under this."""
+    env_dir = os.environ.get("PKTSNMP_INSTALL_DIR")
+    if env_dir:
+        return Path(env_dir)
+    if config_path is not None:
+        return config_path.resolve().parent
+    return Path.cwd()
+
+
+_CONFIG_PATH = _find_config_path()
+_yaml_cfg = _load_yaml(_CONFIG_PATH)
+_INSTALL_DIR = _default_install_dir(_CONFIG_PATH)
 
 
 class Settings(BaseSettings):
@@ -65,13 +88,16 @@ class Settings(BaseSettings):
     workers: int = Field(default=_yaml_cfg.get("workers", 2))
     debug: bool = Field(default=_yaml_cfg.get("debug", False))
 
+    # ── App root — every other path below defaults to somewhere under this ────
+    install_dir: str = Field(default=_yaml_cfg.get("install_dir", str(_INSTALL_DIR)))
+
     # ── First-boot admin seed ─────────────────────────────────────────────────
-    # Set by docker-entrypoint.sh from APP_ADMIN_PASSWORD; ignored if DB exists.
+    # Set by install.sh from PKTSNMP_ADMIN_PASSWORD; ignored if DB already has users.
     admin_password: str = Field(default="")
 
     # ── App database (SQLite sidecar) ─────────────────────────────────────────
     db_path: str = Field(
-        default=_yaml_cfg.get("db_path", "/opt/pktsnmp/pktsnmp.db")
+        default=_yaml_cfg.get("db_path", str(_INSTALL_DIR / "pktsnmp.db"))
     )
 
     # ── ClickHouse (startup connection — overridable at runtime via settings) ──
@@ -83,7 +109,7 @@ class Settings(BaseSettings):
 
     # ── DuckDB (alternate backend) ────────────────────────────────────────────
     duckdb_path: str = Field(
-        default=_yaml_cfg.get("duckdb_path", "/opt/pktsnmp/snmp.duckdb")
+        default=_yaml_cfg.get("duckdb_path", str(_INSTALL_DIR / "snmp.duckdb"))
     )
 
     # ── JWT ───────────────────────────────────────────────────────────────────
@@ -105,8 +131,11 @@ class Settings(BaseSettings):
     # ── Logging ───────────────────────────────────────────────────────────────
     log_level: str = Field(default=_yaml_cfg.get("log_level", "info"))
     log_file: str = Field(
-        default=_yaml_cfg.get("log_file", "/opt/pktsnmp/logs/pktsnmp.log")
+        default=_yaml_cfg.get("log_file", str(_INSTALL_DIR / "logs" / "pktsnmp.log"))
     )
+
+    # ── SSL certificate storage ─────────────────────────────────────────────────
+    ssl_dir: str = Field(default=_yaml_cfg.get("ssl_dir", str(_INSTALL_DIR / "ssl")))
 
 
 @lru_cache
@@ -122,8 +151,7 @@ def get_settings() -> Settings:  # type: ignore[misc]
     s = Settings()
     try:
         import sqlite3 as _sq, json as _j
-        from pathlib import Path as _P
-        _db_path = str(_P(__file__).parent.parent / 'pktsnmp.db')
+        _db_path = s.db_path
         _conn = _sq.connect(_db_path)
         _row = _conn.execute("SELECT value FROM settings WHERE key='suite_token'").fetchone()
         _conn.close()

@@ -68,9 +68,9 @@ async def seed_admin() -> None:
     Create the default admin user on first boot.
 
     Called by main.py lifespan after init_db().  Reads the plain-text password
-    from PKTSNMP_ADMIN_PASSWORD (set by docker-entrypoint.sh from APP_ADMIN_PASSWORD).
+    from PKTSNMP_ADMIN_PASSWORD (set by install.sh to a randomly generated value).
     If the users table is empty and the password is blank, the process exits
-    with a clear error message so the container fails loudly rather than silently.
+    with a clear error message rather than silently starting with no admin account.
     """
     _settings = get_settings()
     admin_password = _settings.admin_password
@@ -86,9 +86,9 @@ async def seed_admin() -> None:
 
         if not admin_password:
             print(
-                "\nFATAL: No users exist and PKTSNMP_ADMIN_PASSWORD (APP_ADMIN_PASSWORD) is not set.\n"
-                "       Set APP_ADMIN_PASSWORD to create the initial admin account.\n"
-                "       Example: docker run -e APP_ADMIN_PASSWORD=changeme ...\n",
+                "\nFATAL: No users exist and PKTSNMP_ADMIN_PASSWORD is not set.\n"
+                "       Set PKTSNMP_ADMIN_PASSWORD to create the initial admin account.\n"
+                "       Example: PKTSNMP_ADMIN_PASSWORD=changeme python3 -m app.main\n",
                 file=sys.stderr,
             )
             sys.exit(1)
