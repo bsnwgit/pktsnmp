@@ -1773,19 +1773,23 @@ async def create_org(body: OrgCreate, _: AdminUser, db: aiosqlite.Connection = D
 
 @router.put("/hierarchy/orgs/{org_id}")
 async def rename_org(org_id: int, body: HierarchyRename, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)) -> dict:
-    async with db.execute("SELECT id FROM orgs WHERE id=?", (org_id,)) as cur:
-        if not await cur.fetchone():
+    async with db.execute("SELECT name FROM orgs WHERE id=?", (org_id,)) as cur:
+        row = await cur.fetchone()
+        if not row:
             raise HTTPException(status_code=404, detail="Org not found")
+    old_name = row[0]
+    new_name = body.name.strip()
     try:
         await db.execute(
-            "UPDATE orgs SET name=?, updated_at=datetime('now') WHERE id=?", (body.name.strip(), org_id)
+            "UPDATE orgs SET name=?, updated_at=datetime('now') WHERE id=?", (new_name, org_id)
         )
+        await db.execute("UPDATE devices SET org=? WHERE org=?", (new_name, old_name))
         await db.commit()
     except Exception as e:
         if "UNIQUE" in str(e):
             raise HTTPException(status_code=409, detail=f"Org '{body.name}' already exists")
         raise
-    return {"id": org_id, "name": body.name.strip()}
+    return {"id": org_id, "name": new_name}
 
 
 @router.delete("/hierarchy/orgs/{org_id}", status_code=204)
@@ -1818,19 +1822,37 @@ async def create_group_def(body: GroupDefCreate, _: AdminUser, db: aiosqlite.Con
 
 @router.put("/hierarchy/groups/{group_id}")
 async def rename_group_def(group_id: int, body: HierarchyRename, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)) -> dict:
-    async with db.execute("SELECT id FROM groups_def WHERE id=?", (group_id,)) as cur:
-        if not await cur.fetchone():
+    async with db.execute(
+        "SELECT g.name, o.name FROM groups_def g JOIN orgs o ON o.id = g.org_id WHERE g.id=?", (group_id,)
+    ) as cur:
+        row = await cur.fetchone()
+        if not row:
             raise HTTPException(status_code=404, detail="Group not found")
+    old_name, org_name = row
+    new_name = body.name.strip()
     try:
         await db.execute(
-            "UPDATE groups_def SET name=?, updated_at=datetime('now') WHERE id=?", (body.name.strip(), group_id)
+            "UPDATE groups_def SET name=?, updated_at=datetime('now') WHERE id=?", (new_name, group_id)
         )
+        if old_name == "(Unassigned)":
+            # The migration that introduced the Group level auto-created this
+            # placeholder per org — devices never had it written to their own
+            # `groups` column, they just render as "(Unassigned)" when blank
+            # (see device_tree). Renaming it should also claim those blank rows.
+            await db.execute(
+                "UPDATE devices SET groups=? WHERE (groups=? OR groups='') AND org=?",
+                (new_name, old_name, org_name),
+            )
+        else:
+            await db.execute(
+                "UPDATE devices SET groups=? WHERE groups=? AND org=?", (new_name, old_name, org_name)
+            )
         await db.commit()
     except Exception as e:
         if "UNIQUE" in str(e):
             raise HTTPException(status_code=409, detail=f"Group '{body.name}' already exists in this org")
         raise
-    return {"id": group_id, "name": body.name.strip()}
+    return {"id": group_id, "name": new_name}
 
 
 @router.delete("/hierarchy/groups/{group_id}", status_code=204)
@@ -1863,19 +1885,33 @@ async def create_site_def(body: SiteDefCreate, _: AdminUser, db: aiosqlite.Conne
 
 @router.put("/hierarchy/sites/{site_id}")
 async def rename_site_def(site_id: int, body: HierarchyRename, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)) -> dict:
-    async with db.execute("SELECT id FROM sites_def WHERE id=?", (site_id,)) as cur:
-        if not await cur.fetchone():
+    async with db.execute(
+        """SELECT s.name, g.name, o.name
+           FROM sites_def s
+           JOIN groups_def g ON g.id = s.group_id
+           JOIN orgs o ON o.id = g.org_id
+           WHERE s.id=?""",
+        (site_id,),
+    ) as cur:
+        row = await cur.fetchone()
+        if not row:
             raise HTTPException(status_code=404, detail="Site not found")
+    old_name, group_name, org_name = row
+    new_name = body.name.strip()
     try:
         await db.execute(
-            "UPDATE sites_def SET name=?, updated_at=datetime('now') WHERE id=?", (body.name.strip(), site_id)
+            "UPDATE sites_def SET name=?, updated_at=datetime('now') WHERE id=?", (new_name, site_id)
+        )
+        await db.execute(
+            "UPDATE devices SET site=? WHERE site=? AND groups=? AND org=?",
+            (new_name, old_name, group_name, org_name),
         )
         await db.commit()
     except Exception as e:
         if "UNIQUE" in str(e):
             raise HTTPException(status_code=409, detail=f"Site '{body.name}' already exists in this group")
         raise
-    return {"id": site_id, "name": body.name.strip()}
+    return {"id": site_id, "name": new_name}
 
 
 @router.delete("/hierarchy/sites/{site_id}", status_code=204)
@@ -1908,19 +1944,34 @@ async def create_location_def(body: LocationDefCreate, _: AdminUser, db: aiosqli
 
 @router.put("/hierarchy/locations/{location_id}")
 async def rename_location_def(location_id: int, body: HierarchyRename, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)) -> dict:
-    async with db.execute("SELECT id FROM locations_def WHERE id=?", (location_id,)) as cur:
-        if not await cur.fetchone():
+    async with db.execute(
+        """SELECT l.name, s.name, g.name, o.name
+           FROM locations_def l
+           JOIN sites_def s ON s.id = l.site_id
+           JOIN groups_def g ON g.id = s.group_id
+           JOIN orgs o ON o.id = g.org_id
+           WHERE l.id=?""",
+        (location_id,),
+    ) as cur:
+        row = await cur.fetchone()
+        if not row:
             raise HTTPException(status_code=404, detail="Location not found")
+    old_name, site_name, group_name, org_name = row
+    new_name = body.name.strip()
     try:
         await db.execute(
-            "UPDATE locations_def SET name=?, updated_at=datetime('now') WHERE id=?", (body.name.strip(), location_id)
+            "UPDATE locations_def SET name=?, updated_at=datetime('now') WHERE id=?", (new_name, location_id)
+        )
+        await db.execute(
+            "UPDATE devices SET location=? WHERE location=? AND site=? AND groups=? AND org=?",
+            (new_name, old_name, site_name, group_name, org_name),
         )
         await db.commit()
     except Exception as e:
         if "UNIQUE" in str(e):
             raise HTTPException(status_code=409, detail=f"Location '{body.name}' already exists in this site")
         raise
-    return {"id": location_id, "name": body.name.strip()}
+    return {"id": location_id, "name": new_name}
 
 
 @router.delete("/hierarchy/locations/{location_id}", status_code=204)

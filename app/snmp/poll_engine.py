@@ -27,6 +27,45 @@ def _decrypt(value: str) -> str:
         return ""
 
 
+# IF-MIB ifEntry columns (ifTable) are indexed per-interface — a bare GET on the
+# column OID returns nothing. ifName (ifXTable) gives a unique label to tag rows
+# with; ifDescr is a fallback for older devices without ifXTable, but ifDescr is
+# often identical across ports sharing the same hardware/driver, so it collides.
+IF_ENTRY_PREFIX = "1.3.6.1.2.1.2.2.1."
+IFNAME_OID = "1.3.6.1.2.1.31.1.1.1.1"
+IFDESCR_OID = "1.3.6.1.2.1.2.2.1.2"
+IFALIAS_OID = "1.3.6.1.2.1.31.1.1.1.18"
+
+
+async def _walk_column(engine, auth_data, target, ctx, root_oid: str, max_rows: int = 128, batch: int = 25) -> dict[str, object]:
+    """GETBULK-walk every instance under root_oid, keyed by the OID suffix (row index)."""
+    from pysnmp.hlapi.asyncio import bulkCmd, ObjectType, ObjectIdentity
+
+    out: dict[str, object] = {}
+    next_oid = root_oid
+    while len(out) < max_rows:
+        error_indication, error_status, _error_index, var_bind_table = await bulkCmd(
+            engine, auth_data, target, ctx, 0, batch,
+            ObjectType(ObjectIdentity(next_oid)),
+        )
+        if error_indication or error_status or not var_bind_table:
+            break
+        done = False
+        for row in var_bind_table:
+            oid_str, value = row[0]
+            oid_str = str(oid_str)
+            if oid_str == root_oid or not oid_str.startswith(root_oid + "."):
+                done = True
+                break
+            out[oid_str[len(root_oid) + 1:]] = value
+            next_oid = oid_str
+            if len(out) >= max_rows:
+                break
+        if done:
+            break
+    return out
+
+
 class PollEngine:
     def __init__(
         self,
@@ -153,40 +192,108 @@ class PollEngine:
                 auth_data = CommunityData(device.get("community") or "public")
 
             # Limit OIDs per poll cycle to avoid overwhelming the device
-            for oid_entry in oids[:20]:
-                oid_str = oid_entry["oid"]
-                oid_label = oid_entry["name"]
+            polled_oids = oids[:20]
+
+            # ifTable columns are indexed per-interface — resolve ifIndex -> ifDescr
+            # once so those rows can be labeled, instead of GETting the bare column OID.
+            if_labels: dict[str, str] = {}
+            if any(o["oid"].startswith(IF_ENTRY_PREFIX) for o in polled_oids):
                 try:
-                    error_indication, error_status, error_index, var_binds = await getCmd(
-                        engine,
-                        auth_data,
-                        target,
-                        ctx,
-                        ObjectType(ObjectIdentity(oid_str)),
-                    )
-                    if error_indication or error_status:
-                        continue
-                    for var_bind in var_binds:
-                        val = var_bind[1]
-                        duration_ms = int((time.monotonic() - start) * 1000)
-                        try:
-                            val_numeric: float | None = float(int(val))
-                        except Exception:
-                            val_numeric = None
+                    raw = await _walk_column(engine, auth_data, target, ctx, IFNAME_OID)
+                    if not raw:
+                        raw = await _walk_column(engine, auth_data, target, ctx, IFDESCR_OID)
+                    if_labels = {k: str(v) for k, v in raw.items()}
+                except Exception as e:
+                    log.debug(f"ifName/ifDescr walk failed for {device['ip']}: {e}")
+
+                # ifAlias is the operator-assigned description (e.g. "WAN", "Guest VLAN") —
+                # not part of the gauge/counter catalog, so it needs its own walk to surface it.
+                try:
+                    alias_raw = await _walk_column(engine, auth_data, target, ctx, IFALIAS_OID)
+                    duration_ms = int((time.monotonic() - start) * 1000)
+                    for suffix, alias_val in alias_raw.items():
+                        alias_str = str(alias_val)
+                        if not alias_str:
+                            continue
                         results.append(
                             {
                                 "collector_id": 1,
                                 "device_id": device["id"],
                                 "device_ip": device["ip"],
-                                "oid": oid_str,
-                                "oid_label": oid_label,
-                                "value": str(val),
-                                "value_numeric": val_numeric,
-                                "value_type": "gauge",
+                                "oid": IFALIAS_OID,
+                                "oid_label": "ifAlias",
+                                "interface_label": if_labels.get(suffix, suffix),
+                                "value": alias_str,
+                                "value_numeric": None,
+                                "value_type": "string",
                                 "poll_duration_ms": duration_ms,
                                 "timestamp": datetime.now(tz=timezone.utc).isoformat(),
                             }
                         )
+                except Exception as e:
+                    log.debug(f"ifAlias walk failed for {device['ip']}: {e}")
+
+            for oid_entry in polled_oids:
+                oid_str = oid_entry["oid"]
+                oid_label = oid_entry["name"]
+                is_table_column = not oid_str.endswith(".0")
+                try:
+                    if is_table_column:
+                        values = await _walk_column(engine, auth_data, target, ctx, oid_str)
+                        duration_ms = int((time.monotonic() - start) * 1000)
+                        for suffix, val in values.items():
+                            iface_label = if_labels.get(suffix, suffix) if oid_str.startswith(IF_ENTRY_PREFIX) else suffix
+                            try:
+                                val_numeric: float | None = float(int(val))
+                            except Exception:
+                                val_numeric = None
+                            results.append(
+                                {
+                                    "collector_id": 1,
+                                    "device_id": device["id"],
+                                    "device_ip": device["ip"],
+                                    "oid": oid_str,
+                                    "oid_label": oid_label,
+                                    "interface_label": iface_label,
+                                    "value": str(val),
+                                    "value_numeric": val_numeric,
+                                    "value_type": "gauge",
+                                    "poll_duration_ms": duration_ms,
+                                    "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+                                }
+                            )
+                    else:
+                        error_indication, error_status, error_index, var_binds = await getCmd(
+                            engine,
+                            auth_data,
+                            target,
+                            ctx,
+                            ObjectType(ObjectIdentity(oid_str)),
+                        )
+                        if error_indication or error_status:
+                            continue
+                        for var_bind in var_binds:
+                            val = var_bind[1]
+                            duration_ms = int((time.monotonic() - start) * 1000)
+                            try:
+                                val_numeric = float(int(val))
+                            except Exception:
+                                val_numeric = None
+                            results.append(
+                                {
+                                    "collector_id": 1,
+                                    "device_id": device["id"],
+                                    "device_ip": device["ip"],
+                                    "oid": oid_str,
+                                    "oid_label": oid_label,
+                                    "interface_label": "",
+                                    "value": str(val),
+                                    "value_numeric": val_numeric,
+                                    "value_type": "gauge",
+                                    "poll_duration_ms": duration_ms,
+                                    "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+                                }
+                            )
                 except Exception as e:
                     log.debug(f"OID {oid_str} failed for {device['ip']}: {e}")
 
