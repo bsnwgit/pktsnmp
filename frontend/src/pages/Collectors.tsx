@@ -5,6 +5,7 @@
  * All users can view collector status and sync state.
  */
 import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { getToken, api, IngestRateBucket } from '../api/client'
 
 interface CollectorImportResult {
@@ -382,6 +383,12 @@ function PreviewModal({ collectorId, collectorName, onClose }: {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function Collectors() {
+  // Deep-linked from an alert's "Investigate" button (Alerts.tsx
+  // buildInvestigateUrl for collector_gap) — highlight and scroll to the
+  // specific collector so it's easy to spot in a long list.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const highlightId = Number(searchParams.get('highlight')) || null
+
   const [collectors, setCollectors] = useState<Collector[]>([])
   const [loading, setLoading]       = useState(true)
   const [showAdd, setShowAdd]       = useState(false)
@@ -419,6 +426,15 @@ export default function Collectors() {
     } catch (e: any) { setError(e.message) } finally { setLoading(false) }
   }
   useEffect(() => { void load() }, [])
+
+  // Scroll the deep-linked collector into view once the list has loaded,
+  // then drop the param so it doesn't keep re-triggering on refetch.
+  useEffect(() => {
+    if (!highlightId || collectors.length === 0) return
+    document.getElementById(`collector-row-${highlightId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    const t = setTimeout(() => setSearchParams({}, { replace: true }), 4000)
+    return () => clearTimeout(t)
+  }, [highlightId, collectors, setSearchParams])
 
   const addCollector = async () => {
     if (!form.name) { setError('Name is required'); return }
@@ -609,7 +625,13 @@ export default function Collectors() {
             </thead>
             <tbody className="divide-y divide-gray-800/50">
               {collectors.map(c => (
-                <tr key={c.id} className="hover:bg-gray-800/30 transition-colors">
+                <tr
+                  key={c.id}
+                  id={`collector-row-${c.id}`}
+                  className={`transition-colors ${
+                    c.id === highlightId ? 'bg-blue-900/30 ring-1 ring-inset ring-blue-500/50' : 'hover:bg-gray-800/30'
+                  }`}
+                >
                   <td className="px-5 py-3">
                     <p className="text-white font-medium text-sm">{c.name}</p>
                     {c.description && <p className="text-xs text-gray-500">{c.description}</p>}
