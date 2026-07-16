@@ -1960,6 +1960,61 @@ function HierarchyTab() {
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set())
   const [expandedSites, setExpandedSites]   = useState<Set<number>>(new Set())
 
+  // Inline rename state — one edit at a time across all levels
+  type HierarchyLevel = 'org' | 'group' | 'site' | 'location'
+  const [editing, setEditing] = useState<{ level: HierarchyLevel; id: number; name: string } | null>(null)
+  const [savingEdit, setSavingEdit] = useState(false)
+
+  const startEdit = (level: HierarchyLevel, id: number, name: string) => setEditing({ level, id, name })
+  const cancelEdit = () => setEditing(null)
+  const saveEdit = async () => {
+    if (!editing) return
+    const name = editing.name.trim()
+    if (!name) return
+    setSavingEdit(true)
+    try {
+      if (editing.level === 'org') await api.updateHierarchyOrg(editing.id, name)
+      else if (editing.level === 'group') await api.updateHierarchyGroup(editing.id, name)
+      else if (editing.level === 'site') await api.updateHierarchySite(editing.id, name)
+      else await api.updateHierarchyLocation(editing.id, name)
+      setEditing(null)
+      setOrgs(await api.getHierarchy())
+    } catch (e: any) { setError(e.message || 'Failed') }
+    finally { setSavingEdit(false) }
+  }
+
+  // Renders either the editable name span (with a small ✎ rename button) or,
+  // while that exact row is being edited, an inline input + save/cancel.
+  const renderName = (level: HierarchyLevel, id: number, name: string, displayCls: string) => {
+    if (editing?.level === level && editing.id === id) {
+      return (
+        <div className="flex items-center gap-1.5 flex-1 min-w-0">
+          <input
+            autoFocus
+            value={editing.name}
+            onChange={e => setEditing(s => s && ({ ...s, name: e.target.value }))}
+            onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit() }}
+            className="flex-1 min-w-0 bg-gray-800 border border-blue-600 rounded px-2 py-0.5 text-sm text-white focus:outline-none"
+          />
+          <button onClick={saveEdit} disabled={savingEdit || !editing.name.trim()} className="text-xs text-green-500 hover:text-green-400 disabled:opacity-40 px-1" title="Save">
+            ✓
+          </button>
+          <button onClick={cancelEdit} className="text-xs text-gray-500 hover:text-gray-300 px-1" title="Cancel">
+            ✕
+          </button>
+        </div>
+      )
+    }
+    return (
+      <span className={`${displayCls} flex-1 flex items-center gap-1.5`}>
+        {name}
+        <button onClick={() => startEdit(level, id, name)} className="text-gray-400 hover:text-blue-400 transition-colors text-xs" title="Rename">
+          ✎
+        </button>
+      </span>
+    )
+  }
+
   const load = async () => {
     setLoading(true)
     try { setOrgs(await api.getHierarchy()) }
@@ -2112,7 +2167,7 @@ function HierarchyTab() {
                 <svg className="w-4 h-4 text-blue-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
                 </svg>
-                <span className="text-sm font-medium text-white flex-1">{org.name}</span>
+                {renderName('org', org.id, org.name, 'text-sm font-medium text-white')}
                 <span className="text-xs text-gray-500">{org.groups.length} group{org.groups.length !== 1 ? 's' : ''}</span>
                 <button
                   onClick={() => deleteOrg(org.id, org.name)}
@@ -2159,7 +2214,7 @@ function HierarchyTab() {
                               <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                               <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
                             </svg>
-                            <span className="text-sm text-white flex-1">{grp.name}</span>
+                            {renderName('group', grp.id, grp.name, 'text-sm text-white')}
                             <span className="text-xs text-gray-500">{grp.sites.length} site{grp.sites.length !== 1 ? 's' : ''}</span>
                             <button
                               onClick={() => deleteGroup(grp.id, grp.name)}
@@ -2205,7 +2260,7 @@ function HierarchyTab() {
                                         <svg className="w-3 h-3 text-amber-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                                           <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
                                         </svg>
-                                        <span className="text-xs text-gray-300 flex-1">{site.name}</span>
+                                        {renderName('site', site.id, site.name, 'text-xs text-gray-300')}
                                         <span className="text-xs text-gray-600">{site.locations.length} location{site.locations.length !== 1 ? 's' : ''}</span>
                                         <button
                                           onClick={() => deleteSite(site.id, site.name)}
@@ -2246,7 +2301,7 @@ function HierarchyTab() {
                                                   <svg className="w-3 h-3 text-purple-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                                                     <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
                                                   </svg>
-                                                  <span className="text-xs text-gray-300 flex-1">{loc.name}</span>
+                                                  {renderName('location', loc.id, loc.name, 'text-xs text-gray-300')}
                                                   <button
                                                     onClick={() => deleteLocation(loc.id, loc.name)}
                                                     className="text-xs text-red-500 hover:text-red-400 px-1.5 py-0.5 rounded transition-colors"
