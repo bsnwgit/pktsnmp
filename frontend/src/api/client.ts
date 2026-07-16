@@ -533,6 +533,7 @@ export interface MetricLatestItem {
 export interface MetricPoint {
   bucket_ts: string
   oid_label: string
+  interface_label: string | null
   avg_value: number | null
   max_value: number | null
   min_value: number | null
@@ -668,8 +669,9 @@ export interface SnmpAlertRule {
  *  interface_label = ifDescr value from otelcol attribute, used as the unique key.
  */
 export interface DeviceInterface {
-  interface_label: string   // e.g. "GigabitEthernet0/0"
-  name: string              // same as interface_label
+  interface_label: string   // e.g. "eth0" — the raw ifName/ifDescr, always present
+  name: string              // ifAlias description when one is set, else interface_label
+  description: string | null // ifAlias, only when it differs from interface_label
   oper_status: 'up' | 'down' | 'unknown'
   admin_status: 'up' | 'down' | 'unknown'
   speed_mbps: number | null
