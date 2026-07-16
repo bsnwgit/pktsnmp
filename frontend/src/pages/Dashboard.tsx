@@ -73,6 +73,16 @@ function AlertBadge({ count, isDown }: { count: number; isDown?: boolean }) {
   )
 }
 
+// ── Collapse chevron ──────────────────────────────────────────────────────────
+
+function CollapseIcon({ expanded }: { expanded: boolean }) {
+  return (
+    <span className="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded border border-gray-500 text-gray-300">
+      <span className="text-xs leading-none">{expanded ? '▾' : '▸'}</span>
+    </span>
+  )
+}
+
 // ── OrgNode ───────────────────────────────────────────────────────────────────
 
 function OrgNode({
@@ -88,7 +98,7 @@ function OrgNode({
         className="flex items-center gap-2 px-4 py-3 bg-gray-800/70 border-b border-gray-700/60 cursor-pointer hover:bg-gray-800 transition-colors"
         onClick={() => setExpanded(x => !x)}
       >
-        <span className="text-xs text-gray-400 w-4 flex-shrink-0">{expanded ? '▾' : '▸'}</span>
+        <CollapseIcon expanded={expanded} />
         <span className="relative flex-shrink-0">
           <span className={`w-2.5 h-2.5 rounded-full block ${subtreeDotColor(st)}`} />
           {(st === 'down' || st === 'alerts') && (
@@ -122,10 +132,10 @@ function GroupNode({
   return (
     <div>
       <div
-        className="flex items-center gap-2 pl-8 pr-4 py-2.5 bg-gray-800/40 border-b border-gray-800/60 cursor-pointer hover:bg-gray-800/60 transition-colors"
+        className="flex items-center gap-2 pl-8 pr-4 py-2.5 mt-2 bg-gray-800/40 border-b border-gray-800/60 border-t border-gray-700/40 cursor-pointer hover:bg-gray-800/60 transition-colors"
         onClick={() => setExpanded(x => !x)}
       >
-        <span className="text-xs text-gray-500 w-4 flex-shrink-0">{expanded ? '▾' : '▸'}</span>
+        <CollapseIcon expanded={expanded} />
         <span className="relative flex-shrink-0">
           <span className={`w-2 h-2 rounded-full block ${subtreeDotColor(st)}`} />
           {(st === 'down' || st === 'alerts') && (
@@ -159,10 +169,10 @@ function SiteNode({
   return (
     <div>
       <div
-        className="flex items-center gap-2 pl-12 pr-4 py-2 border-b border-gray-800/40 cursor-pointer hover:bg-gray-800/20 transition-colors"
+        className="flex items-center gap-2 pl-12 pr-4 py-2 mt-1.5 border-b border-gray-800/40 border-t border-gray-700/30 cursor-pointer hover:bg-gray-800/20 transition-colors"
         onClick={() => setExpanded(x => !x)}
       >
-        <span className="text-xs text-gray-600 w-4 flex-shrink-0">{expanded ? '▾' : '▸'}</span>
+        <CollapseIcon expanded={expanded} />
         <span className="relative flex-shrink-0">
           <span className={`w-2 h-2 rounded-full block ${subtreeDotColor(st)}`} />
           {(st === 'down' || st === 'alerts') && (
@@ -200,10 +210,10 @@ function LocationNode({
   return (
     <div>
       <div
-        className="flex items-center gap-2 pl-16 pr-4 py-2 border-b border-gray-800/30 cursor-pointer hover:bg-gray-800/20 transition-colors"
+        className="flex items-center gap-2 pl-16 pr-4 py-2 mt-1 border-b border-gray-800/30 border-t border-gray-700/20 cursor-pointer hover:bg-gray-800/20 transition-colors"
         onClick={() => setExpanded(x => !x)}
       >
-        <span className="text-xs text-gray-700 w-4 flex-shrink-0">{expanded ? '▾' : '▸'}</span>
+        <CollapseIcon expanded={expanded} />
         <span className="relative flex-shrink-0">
           <span className={`w-2 h-2 rounded-full block ${subtreeDotColor(st)}`} />
           {(st === 'down' || st === 'alerts') && (

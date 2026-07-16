@@ -430,13 +430,14 @@ class SQLiteStorage(StorageBase):
                         'unixepoch'
                     ) AS bucket_ts,
                     oid_label,
+                    interface_label,
                     AVG(value_numeric)  AS avg_value,
                     MAX(value_numeric)  AS max_value,
                     MIN(value_numeric)  AS min_value,
                     COUNT(*)            AS sample_count
                 FROM snmp_poll_results
                 {where}
-                GROUP BY bucket_ts, oid_label
+                GROUP BY bucket_ts, oid_label, interface_label
                 ORDER BY bucket_ts ASC, oid_label ASC
                 LIMIT ?
             """
@@ -446,6 +447,7 @@ class SQLiteStorage(StorageBase):
                 SELECT
                     polled_at            AS bucket_ts,
                     oid_label,
+                    interface_label,
                     value_numeric        AS avg_value,
                     value_numeric        AS max_value,
                     value_numeric        AS min_value,
@@ -610,7 +612,7 @@ class SQLiteStorage(StorageBase):
         IF_OID_LABELS = (
             "ifOperStatusMetric", "ifAdminStatusMetric", "ifSpeedMetric",
             "ifOperStatus", "ifAdminStatus", "ifSpeed",
-            "ifType", "ifPhysAddress",
+            "ifType", "ifPhysAddress", "ifAlias",
             "ifInOctets", "ifOutOctets",
         )
         placeholders = ",".join("?" * len(IF_OID_LABELS))
@@ -681,13 +683,23 @@ class SQLiteStorage(StorageBase):
                 iface["if_type"] = val
             elif label == "ifPhysAddress":
                 iface["mac"] = val
+            elif label == "ifAlias":
+                if val:
+                    iface["description"] = val
 
         result = []
         for iface_label in sorted(interfaces):
             iface = interfaces[iface_label]
+            # ifAlias is only a meaningful "description" when an operator actually set
+            # one that differs from the interface's own name (many devices just mirror
+            # ifName into ifAlias when nothing was configured).
+            description = iface.get("description")
+            if description == iface_label:
+                description = None
             result.append({
                 "interface_label": iface_label,
-                "name":            iface_label,
+                "name":            description or iface_label,
+                "description":     description,
                 "oper_status":     iface.get("oper_status", "unknown"),
                 "admin_status":    iface.get("admin_status", "unknown"),
                 "speed_mbps":      iface.get("speed_mbps"),
