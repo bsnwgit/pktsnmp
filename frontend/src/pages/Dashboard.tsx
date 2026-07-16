@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   api, SnmpDashboard,
-  EnvironmentNode, OrgTreeNode, GroupTreeNode, SiteTreeNode, DeviceTreeNode,
+  EnvironmentNode, OrgTreeNode, GroupTreeNode, SiteTreeNode, LocationTreeNode, DeviceTreeNode,
 } from '../api/client'
 import { useAutoRefresh } from '../store/autoRefresh'
 import DeviceMetricsPanel from '../components/DeviceMetricsPanel'
@@ -188,6 +188,47 @@ function SiteNode({
   )
 }
 
+// ── LocationNode ──────────────────────────────────────────────────────────────
+
+function LocationNode({
+  node, signal, onNavigate,
+}: {
+  node: LocationTreeNode; signal: CollapseSignal; onNavigate: (n: DeviceTreeNode) => void
+}) {
+  const [expanded, setExpanded] = useCollapseSync(signal)
+  const st = subtreeStatus(node.children)
+  return (
+    <div>
+      <div
+        className="flex items-center gap-2 pl-16 pr-4 py-2 border-b border-gray-800/30 cursor-pointer hover:bg-gray-800/20 transition-colors"
+        onClick={() => setExpanded(x => !x)}
+      >
+        <span className="text-xs text-gray-700 w-4 flex-shrink-0">{expanded ? '▾' : '▸'}</span>
+        <span className="relative flex-shrink-0">
+          <span className={`w-2 h-2 rounded-full block ${subtreeDotColor(st)}`} />
+          {(st === 'down' || st === 'alerts') && (
+            <span className={`absolute inset-0 rounded-full animate-ping opacity-60 ${st === 'down' ? 'bg-red-500' : 'bg-yellow-400'}`} />
+          )}
+        </span>
+        <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">{node.name}</span>
+        <span className="text-xs text-gray-800 ml-1">location</span>
+        <div className="flex-1" />
+        <AlertBadge count={node.subtree_alerts} />
+      </div>
+      {expanded && (
+        <div className="border-l border-gray-800/50 ml-[68px]">
+          {node.children.map(child => (
+            <EnvironmentNodeComp
+              key={child.type === 'device' ? child.id : `${child.type}-${child.name}`}
+              node={child} signal={signal} onNavigate={onNavigate}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── DeviceNode ────────────────────────────────────────────────────────────────
 
 function dotColor(node: DeviceTreeNode): string {
@@ -287,6 +328,11 @@ function DeviceNode({
               {node.ha_role}
             </span>
           )}
+          {node.parent_name && (
+            <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-gray-800/60 text-gray-500 border border-gray-700/50">
+              Parent: {node.parent_name}
+            </span>
+          )}
           <span className="text-xs text-gray-500 ml-2 font-mono">{node.ip}</span>
         </div>
 
@@ -343,9 +389,10 @@ function EnvironmentNodeComp({
 }: {
   node: EnvironmentNode; signal: CollapseSignal; onNavigate: (n: DeviceTreeNode) => void
 }) {
-  if (node.type === 'org')    return <OrgNode   node={node} signal={signal} onNavigate={onNavigate} />
-  if (node.type === 'group')  return <GroupNode  node={node} signal={signal} onNavigate={onNavigate} />
-  if (node.type === 'site')   return <SiteNode   node={node} signal={signal} onNavigate={onNavigate} />
+  if (node.type === 'org')      return <OrgNode      node={node} signal={signal} onNavigate={onNavigate} />
+  if (node.type === 'group')    return <GroupNode    node={node} signal={signal} onNavigate={onNavigate} />
+  if (node.type === 'site')     return <SiteNode     node={node} signal={signal} onNavigate={onNavigate} />
+  if (node.type === 'location') return <LocationNode node={node} signal={signal} onNavigate={onNavigate} />
   return <DeviceNode node={node} depth={0} signal={signal} onNavigate={onNavigate} />
 }
 

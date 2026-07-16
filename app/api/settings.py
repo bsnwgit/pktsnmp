@@ -21,7 +21,10 @@ router = APIRouter()
 # ── Default settings (applied on first run) ───────────────────────────────────
 DEFAULTS: dict[str, Any] = {
     # Storage
-    "storage_backend": "duckdb",          # clickhouse | duckdb
+    "storage_backend": "sqlite",          # sqlite | duckdb | clickhouse — sqlite is the only
+                                           # backend that implements the full StorageBase
+                                           # interface (see app/storage/*.py); duckdb and
+                                           # clickhouse are both missing several query methods
     "retention_days_raw": 90,
     "retention_days_hourly": 365,
 
