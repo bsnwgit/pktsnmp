@@ -34,6 +34,7 @@ async def list_events(
     active: Optional[bool] = Query(None, description="If true, only unresolved events"),
     limit: int = Query(200, ge=1, le=2000),
     since: Optional[str] = Query(None, description="ISO datetime lower bound"),
+    until: Optional[str] = Query(None, description="ISO datetime upper bound"),
 ) -> list[dict]:
     db.row_factory = aiosqlite.Row
     clauses = []
@@ -44,8 +45,15 @@ async def list_events(
     if active is True:
         clauses.append("e.resolved_at IS NULL")
     if since:
-        clauses.append("e.fired_at >= ?")
+        # fired_at is stored via SQLite's own datetime('now') (space-separated,
+        # no 'Z'/fractional seconds) — wrap the incoming ISO string in datetime()
+        # too so the comparison is format-normalized on both sides, not a raw
+        # string compare that would silently mismatch on 'T'/'Z'/milliseconds.
+        clauses.append("e.fired_at >= datetime(?)")
         params.append(since)
+    if until:
+        clauses.append("e.fired_at <= datetime(?)")
+        params.append(until)
 
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     params.append(limit)
@@ -130,7 +138,7 @@ async def list_rules(
 ) -> list[dict]:
     db.row_factory = aiosqlite.Row
     async with db.execute(
-        "SELECT *, (id IN (1,2)) AS builtin FROM alert_rules ORDER BY id"
+        "SELECT * FROM alert_rules ORDER BY id"
     ) as cur:
         rows = await cur.fetchall()
     result = []

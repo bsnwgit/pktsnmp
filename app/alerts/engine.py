@@ -27,6 +27,7 @@ from datetime import datetime, timezone, timedelta
 import aiosqlite
 
 from app.config import get_settings
+from app.storage.factory import get_storage
 
 log = logging.getLogger("pktsnmp.alerts.engine")
 
@@ -207,7 +208,7 @@ class AlertEngine:
                 continue
             device_id = device["id"]
 
-            rows = await _poll_window(db, device_id, None, "ifOperStatusMetric", window_min)
+            rows = await _poll_window(device_id, None, "ifOperStatusMetric", window_min)
             if not rows:
                 continue
 
@@ -244,7 +245,7 @@ class AlertEngine:
                 continue
             device_id = device["id"]
 
-            rows = await _poll_window(db, device_id, None, "ifOperStatusMetric", window_min)
+            rows = await _poll_window(device_id, None, "ifOperStatusMetric", window_min)
             if len(rows) < 2:
                 continue
 
@@ -299,7 +300,7 @@ class AlertEngine:
                 continue
             device_id = device["id"]
 
-            rows = await _poll_window(db, device_id, None, oid_label, window_min)
+            rows = await _poll_window(device_id, None, oid_label, window_min)
             if not rows:
                 continue
 
@@ -362,8 +363,8 @@ class AlertEngine:
                 continue
             device_id = device["id"]
 
-            recent_rows   = await _poll_window(db, device_id, None, oid_label, recent_min)
-            baseline_rows = await _poll_window(db, device_id, None, oid_label, baseline_min)
+            recent_rows   = await _poll_window(device_id, None, oid_label, recent_min)
+            baseline_rows = await _poll_window(device_id, None, oid_label, baseline_min)
             if not recent_rows or not baseline_rows:
                 continue
 
@@ -423,7 +424,7 @@ class AlertEngine:
             triggered_oid = None
             triggered_val = 0.0
             for oid in oids:
-                rows = await _poll_window(db, device_id, None, oid, window_min)
+                rows = await _poll_window(device_id, None, oid, window_min)
                 rate = _avg_rate(rows)
                 if rate is not None and rate > threshold:
                     triggered_oid = oid
@@ -473,7 +474,7 @@ class AlertEngine:
             triggered_oid = None
             triggered_val = 0.0
             for oid in oids:
-                rows = await _poll_window(db, device_id, None, oid, window_min)
+                rows = await _poll_window(device_id, None, oid, window_min)
                 rate = _avg_rate(rows)
                 if rate is not None and rate > threshold:
                     triggered_oid = oid
@@ -531,8 +532,8 @@ class AlertEngine:
             triggered = False
             triggered_detail = ""
             for err_oid, pkt_oid in pairs:
-                err_rows = await _poll_window(db, device_id, None, err_oid, window_min)
-                pkt_rows = await _poll_window(db, device_id, None, pkt_oid, window_min)
+                err_rows = await _poll_window(device_id, None, err_oid, window_min)
+                pkt_rows = await _poll_window(device_id, None, pkt_oid, window_min)
                 err_rate = _avg_rate(err_rows)
                 pkt_rate = _avg_rate(pkt_rows)
                 if err_rate is None or pkt_rate is None or pkt_rate == 0:
@@ -594,7 +595,7 @@ class AlertEngine:
             device_id = device["id"]
 
             # Get ifSpeed (bits/sec from SNMP, reported as-is by otelcol)
-            speed_rows = await _poll_window(db, device_id, None, "ifSpeedMetric", window_min)
+            speed_rows = await _poll_window(device_id, None, "ifSpeedMetric", window_min)
             speeds = [r["value_numeric"] for r in speed_rows if r["value_numeric"] and r["value_numeric"] > 0]
             if not speeds:
                 continue
@@ -603,7 +604,7 @@ class AlertEngine:
             triggered = False
             triggered_detail = ""
             for octet_oid in octets_oids:
-                rows = await _poll_window(db, device_id, None, octet_oid, window_min)
+                rows = await _poll_window(device_id, None, octet_oid, window_min)
                 rate_octets = _avg_rate(rows)
                 if rate_octets is None:
                     continue
@@ -657,7 +658,7 @@ class AlertEngine:
                 continue
             device_id = device["id"]
 
-            rows = await _poll_window(db, device_id, None, "ifSpeedMetric", window_min)
+            rows = await _poll_window(device_id, None, "ifSpeedMetric", window_min)
             speeds = [r["value_numeric"] for r in rows if r["value_numeric"] is not None]
             if len(speeds) < 2:
                 continue
@@ -706,15 +707,9 @@ class AlertEngine:
                 continue
             collector_id = collector["id"]
 
-            async with db.execute(
-                """SELECT (julianday('now') - julianday(MAX(polled_at))) * 1440.0 AS minutes_ago
-                   FROM snmp_poll_results
-                   WHERE collector_id = ?""",
-                [collector_id],
-            ) as cur:
-                row = await cur.fetchone()
-
-            minutes_ago = row["minutes_ago"] if (row and row["minutes_ago"] is not None) else 9999
+            last_poll = await get_storage().get_collector_last_poll(collector_id)
+            last_poll_dt = _parse_ts(last_poll)
+            minutes_ago = (now - last_poll_dt).total_seconds() / 60.0 if last_poll_dt else 9999
             is_gap = minutes_ago >= silence_minutes
 
             if is_gap:
@@ -773,14 +768,9 @@ class AlertEngine:
                 continue
             device_id = device["id"]
 
-            async with db.execute(
-                """SELECT (julianday('now') - julianday(MAX(polled_at))) * 1440.0 AS minutes_ago
-                   FROM snmp_poll_results WHERE device_id = ?""",
-                [device_id],
-            ) as cur:
-                row = await cur.fetchone()
-
-            minutes_ago = row["minutes_ago"] if (row and row["minutes_ago"] is not None) else 9999
+            last_poll = await get_storage().get_device_last_poll(device_id, None)
+            last_poll_dt = _parse_ts(last_poll)
+            minutes_ago = (now - last_poll_dt).total_seconds() / 60.0 if last_poll_dt else 9999
             is_gap = minutes_ago >= silence_minutes
 
             if is_gap:
@@ -818,31 +808,18 @@ class AlertEngine:
         cooldown_min     = int(rule.get("cooldown_min", 30))
         device_id_filter = conditions.get("device_id")
 
-        # Look for matching traps in the time window
+        # Traps live in the configured storage backend (snmp_timeseries.db for the
+        # default SQLite backend), not the control-plane pktsnmp.db — must go
+        # through get_storage(), same as poll history (see _poll_window above).
+        since_iso = (now - timedelta(minutes=window_min)).isoformat()
+        raw_traps = await get_storage().query_trap_events(
+            device_id=int(device_id_filter) if device_id_filter else None,
+            since_iso=since_iso,
+            limit=20,
+        )
         if trap_oid_prefix:
-            oid_condition = " AND trap_oid LIKE ?"
-            oid_params    = [f"{trap_oid_prefix}%"]
-        else:
-            oid_condition = ""
-            oid_params    = []
-
-        if device_id_filter:
-            dev_condition = " AND device_id = ?"
-            dev_params    = [int(device_id_filter)]
-        else:
-            dev_condition = ""
-            dev_params    = []
-
-        window_param = f"-{window_min} minutes"
-        async with db.execute(
-            f"""SELECT id, received_at, trap_oid, source_ip, device_id
-                FROM snmp_traps
-                WHERE received_at >= datetime('now', ?)
-                  {oid_condition} {dev_condition}
-                ORDER BY received_at DESC LIMIT 20""",
-            [window_param] + oid_params + dev_params,
-        ) as cur:
-            traps = [dict(r) for r in await cur.fetchall()]
+            raw_traps = [t for t in raw_traps if (t.get("trap_oid") or "").startswith(trap_oid_prefix)]
+        traps = list(reversed(raw_traps))  # query_trap_events returns oldest-first; want most-recent-first
 
         if traps:
             t = traps[0]
@@ -879,29 +856,20 @@ class AlertEngine:
 # ── Shared helpers ────────────────────────────────────────────────────────────
 
 async def _poll_window(
-    db: aiosqlite.Connection,
     device_id: int | None,
     device_ip: str | None,
     oid_label: str,
     window_min: int,
 ) -> list[dict]:
-    """Return rows for device+OID in the last window_min minutes, oldest first."""
-    if device_id is not None:
-        cond, param = "device_id = ?", device_id
-    elif device_ip is not None:
-        cond, param = "device_ip = ?", device_ip
-    else:
+    """Return rows for device+OID in the last window_min minutes, oldest first.
+
+    Poll history lives in the configured storage backend (snmp_timeseries.db for
+    the default SQLite backend), not the control-plane pktsnmp.db — must go
+    through get_storage(), never a raw query against the alert engine's own db.
+    """
+    if device_id is None and device_ip is None:
         return []
-    async with db.execute(
-        f"""SELECT polled_at, value_numeric
-            FROM snmp_poll_results
-            WHERE {cond} AND oid_label = ?
-              AND polled_at >= datetime('now', ?)
-            ORDER BY polled_at ASC""",
-        [param, oid_label, f"-{window_min} minutes"],
-    ) as cur:
-        rows = await cur.fetchall()
-    return [dict(r) for r in rows]
+    return await get_storage().get_metric_in_window(device_id, device_ip, oid_label, window_min)
 
 
 def _avg_rate(rows: list[dict]) -> float | None:

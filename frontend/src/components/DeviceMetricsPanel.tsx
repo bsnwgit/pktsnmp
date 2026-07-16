@@ -19,6 +19,13 @@ import {
 
 // ── Rate computation ──────────────────────────────────────────────────────────
 
+// Bucketed bucket_ts comes back as naive UTC (no 'Z'/offset) from SQLite's
+// datetime(epoch, 'unixepoch') — normalize before parsing so timestamps aren't
+// misread as local time. Safe to call on already-offset-bearing strings too.
+function toUtc(ts: string): string {
+  return ts.includes('T') || ts.endsWith('Z') ? ts : ts.replace(' ', 'T') + 'Z'
+}
+
 interface RatePoint {
   t: number      // unix ms
   inBps: number | null
@@ -49,7 +56,7 @@ function sumPerInterfaceRate(series: MetricPoint[], oidLabel: string): Map<strin
       const prev = rows[i - 1]
       const row = rows[i]
       if (prev.max_value == null || row.max_value == null) continue
-      const dtSec = (new Date(row.bucket_ts).getTime() - new Date(prev.bucket_ts).getTime()) / 1000
+      const dtSec = (new Date(toUtc(row.bucket_ts)).getTime() - new Date(toUtc(prev.bucket_ts)).getTime()) / 1000
       if (dtSec <= 0) continue
       const delta = row.max_value - prev.max_value
       if (delta < 0) continue // counter reset
@@ -66,7 +73,7 @@ function computeRates(series: MetricPoint[]): RatePoint[] {
   const timestamps = [...new Set([...inTotals.keys(), ...outTotals.keys()])].sort()
 
   return timestamps.map(ts => ({
-    t: new Date(ts).getTime(),
+    t: new Date(toUtc(ts)).getTime(),
     inBps:  inTotals.get(ts)  ?? null,
     outBps: outTotals.get(ts) ?? null,
   }))
@@ -84,12 +91,7 @@ function fmtBytes(bps: number | null | undefined): string {
 
 function fmtRelative(ts: string | null): string {
   if (!ts) return '—'
-  const utc = ts.includes('T') || ts.endsWith('Z') ? ts : ts.replace(' ', 'T') + 'Z'
-  const secs = Math.floor((Date.now() - new Date(utc).getTime()) / 1000)
-  if (secs < 60)    return `${secs}s ago`
-  if (secs < 3600)  return `${Math.floor(secs / 60)}m ago`
-  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`
-  return `${Math.floor(secs / 86400)}d ago`
+  return new Date(toUtc(ts)).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
 }
 
 // ── Sparkline ─────────────────────────────────────────────────────────────────
