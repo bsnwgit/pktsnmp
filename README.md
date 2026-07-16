@@ -462,7 +462,7 @@ Custom rules are added via **Alerts → Rules** in the UI. Each rule specifies t
 
 - **Alerts menu badge** — shows the count of unresolved, unacknowledged events; polls every 30 seconds
 - **Environment card** — red border and tinted header when any device is alerting
-- **Device tree dots** — red pulsing dot on the device and its parent Org/Group/Site nodes
+- **Device tree dots** — red pulsing dot on the device and its parent Org/Group/Site/Location nodes
 
 Supported notification channels: `inapp`, `email`, `slack`, `pagerduty`, `webhook`.
 
@@ -470,21 +470,31 @@ Supported notification channels: `inapp`, `email`, `slack`, `pagerduty`, `webhoo
 
 ## Device Hierarchy
 
-Devices are organized in a four-level hierarchy: **Org → Group → Site → Device**.
+Devices are organized in a five-level hierarchy: **Org → Group → Site → Location → Device**.
+
+> **Note:** Prior to the Location level being added, this was a three-level Org → Group → Site
+> hierarchy. Migrating installs shift existing data down automatically: what was in Group moves
+> to Site, and what was in Site moves to the new Location level — Group starts out empty for
+> every existing org (see the `(Unassigned)` placeholder in Settings → Hierarchy) and can be
+> populated/reassigned as needed.
 
 ### Setup
 
-1. Define Orgs, Groups, and Sites in **Settings → Hierarchy**
-2. Assign each device to an Org, Group, and Site when adding/editing it in **Devices**
+1. Define Orgs, Groups, Sites, and Locations in **Settings → Hierarchy**
+2. Assign each device to an Org, Group, Site, and Location when adding/editing it in **Devices**
 
 ### Dashboard tree
 
-The Dashboard **Environment** card displays the full hierarchy. Status dots on Org, Group, and Site nodes reflect the worst-case status of all devices beneath them:
+The Dashboard **Environment** card displays the full hierarchy. Status dots on Org, Group, Site, and Location nodes reflect the worst-case status of all devices beneath them:
 
 - 🔴 Red (pulsing) — at least one device is `down`
 - 🟡 Yellow (pulsing) — at least one device has active alerts
 - 🟢 Green — all devices up and no alerts
 - ⚫ Gray — no enabled devices or unknown
+
+A device with a `parent_device_id` set only nests under its parent in the tree when they share
+the same Org/Group/Site/Location — otherwise it's grouped under its own location, with a small
+"Parent: `<name>`" badge pointing back to the parent.
 
 ### Device fields
 
@@ -493,7 +503,7 @@ The Dashboard **Environment** card displays the full hierarchy. Status dots on O
 | Name | Display name |
 | IP | Management IP |
 | Device type | `router` / `switch` / `firewall` / `server` / `wireless` / `ups` / `other` |
-| Org / Group / Site | Hierarchy assignment |
+| Org / Group / Site / Location | Hierarchy assignment |
 | Collector | Which collector polls this device |
 | `otelcol_label` | Path prefix used to match OTLP metrics (e.g. `SITE1/SW1`) |
 | HA role | `standalone` / `active` / `standby` |
