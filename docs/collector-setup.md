@@ -85,7 +85,7 @@ Tokens can be rotated from **Settings → Collectors → Rotate Token**, then re
 ## Local Collector
 
 The local collector (collector_id=1) is always running. It:
-- Polls all devices with `collector_id=1` and `enabled=1` using pysnmp GET
+- Polls all devices with `collector_id=1` and `enabled=1` using pysnmp — scalar OIDs via plain GET, ifTable-indexed OIDs (ifInOctets, ifSpeed, ifOperStatus, etc.) via a GETBULK walk per interface. Each interface's rows are labeled with its ifName (falling back to ifDescr), and its ifAlias is polled separately to surface an operator-set description where one exists.
 - Listens for SNMP traps on UDP 162 (requires `CAP_NET_BIND_SERVICE` — already set in `pktsnmp.service`)
 - Reads its settings from SQLite at startup: `snmp_trap_enabled`, `snmp_poll_enabled`, `snmp_poll_default_interval_seconds`, `snmp_trap_port`
 
@@ -130,7 +130,8 @@ otelcol collector(s)
             └─ SQLite snmp_timeseries.db: INSERT INTO snmp_poll_results
 
 pysnmp local poller (in-process)
-  └─ asyncio poll loop → GET per OID per device
+  └─ asyncio poll loop → scalar OIDs: GET per OID per device
+                       → ifTable OIDs: GETBULK-walk per device, one row per interface
        └─ SQLite snmp_timeseries.db: INSERT INTO snmp_poll_results
 
 asyncio trap receiver (UDP 162)

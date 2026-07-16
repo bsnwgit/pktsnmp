@@ -284,7 +284,9 @@ otelcol  →  POST /api/snmp/ingest/otlp/v1/metrics
          →  UPDATE devices SET last_seen, status='up'
          →  SQLite snmp_timeseries.db: snmp_poll_results
 
-pysnmp local poller  →  asyncio GET loop
+pysnmp local poller  →  scalar OIDs: plain GET
+                     →  ifTable-indexed OIDs (ifInOctets, ifSpeed, etc.): GETBULK-walked
+                        per interface, labeled via ifName (fallback ifDescr) + ifAlias
                      →  SQLite snmp_timeseries.db: snmp_poll_results
 
 SNMP trap (UDP 162)  →  decode trap
