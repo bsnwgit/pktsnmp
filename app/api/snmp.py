@@ -212,7 +212,8 @@ class DeviceCreate(BaseModel):
     ip: str
     org: str = ""          # Org (top level)
     groups: str = ""       # Group (second level; 'group' is a SQL keyword so column is 'groups')
-    site: str = ""         # Site (third level; was 'location' before migration 011)
+    site: str = ""         # Site (third level; was 'Group' before migration 017)
+    location: str = ""     # Location (fourth level; was 'Site' before migration 017)
     device_type: str = ""  # firewall|switch|wap|wlc|router|iot|ups|server|storage|pdu|camera|load_balancer|vpn|printer|other|''
     collector_id: int = 1
     credential_id: int | None = None
@@ -231,6 +232,7 @@ class DeviceUpdate(BaseModel):
     org: str | None = None
     groups: str | None = None
     site: str | None = None
+    location: str | None = None
     device_type: str | None = None
     collector_id: int | None = None
     credential_id: int | None = None
@@ -668,7 +670,7 @@ async def _load_devices_for_push(collector_id: int, db: aiosqlite.Connection) ->
 # =============================================================================
 
 _DEVICE_SELECT = """
-    SELECT d.id, d.name, d.ip, d.org, d.groups, d.site, d.device_type,
+    SELECT d.id, d.name, d.ip, d.org, d.groups, d.site, d.location, d.device_type,
            d.collector_id, d.credential_id,
            d.poll_interval_override, d.last_seen, d.status, d.last_error,
            d.otelcol_label, d.otelcol_pipeline, d.enabled, d.created_at, d.updated_at,
@@ -711,10 +713,10 @@ async def list_devices(
 
 @router.get("/devices/tree")
 async def device_tree(_: CurrentUser, db: aiosqlite.Connection = Depends(get_db)) -> list[dict]:
-    """Return the full environment tree: Org → Group → Site → Root Devices → Child Devices.
+    """Return the full environment tree: Org → Group → Site → Location → Root Devices → Child Devices.
 
-    DB columns: org (Org), site (Group in UI), location (Site in UI).
-    Virtual grouping node types: 'org', 'group', 'site'.
+    DB columns: org (Org), groups (Group), site (Site), location (Location).
+    Virtual grouping node types: 'org', 'group', 'site', 'location'.
     Device nodes: type='device'. Passive HA devices hidden; children redirect to active peer.
     """
     from collections import defaultdict
@@ -722,7 +724,7 @@ async def device_tree(_: CurrentUser, db: aiosqlite.Connection = Depends(get_db)
 
     # Fetch ALL devices (passive too) to build peer map
     async with db.execute(
-        """SELECT id, name, ip, org, groups, site, device_type, status, enabled,
+        """SELECT id, name, ip, org, groups, site, location, device_type, status, enabled,
                   parent_device_id, ha_role, ha_peer_id, last_seen
            FROM devices ORDER BY name"""
     ) as cur:
@@ -752,6 +754,7 @@ async def device_tree(_: CurrentUser, db: aiosqlite.Connection = Depends(get_db)
             "org": r["org"] or "",
             "groups": r["groups"] or "",      # "Group" in UI
             "site": r["site"] or "",          # "Site" in UI
+            "location": r["location"] or "", # "Location" in UI
             "device_type": r["device_type"] or "",
             "status": r["status"] or "unknown",
             "enabled": bool(r["enabled"]),
@@ -764,14 +767,32 @@ async def device_tree(_: CurrentUser, db: aiosqlite.Connection = Depends(get_db)
             "children": [],
         }
 
-    # Wire device parent → child; passive parents redirect to active peer
+    # Wire device parent → child; passive parents redirect to active peer.
+    # Only nest a device under its parent when they share the same org/group/
+    # site/location — a device physically at a different location needs to
+    # show up under its OWN location's branch, not vanish into the parent's.
+    # Every device still carries parent_id/parent_name so the UI can
+    # reference the parent even when it isn't nested underneath it.
     device_roots: list[dict] = []
     for node in nodes.values():
         pid = node["parent_device_id"]
         if pid in peer_map:
             pid = peer_map[pid]
-        if pid and pid in nodes:
-            nodes[pid]["children"].append(node)
+        parent = nodes.get(pid) if pid else None
+        if parent:
+            node["parent_id"] = parent["id"]
+            node["parent_name"] = parent["name"]
+        else:
+            node["parent_id"] = None
+            node["parent_name"] = None
+        same_location = parent is not None and (
+            parent["org"] == node["org"]
+            and parent["groups"] == node["groups"]
+            and parent["site"] == node["site"]
+            and parent["location"] == node["location"]
+        )
+        if same_location:
+            parent["children"].append(node)
         else:
             device_roots.append(node)
 
@@ -786,13 +807,16 @@ async def device_tree(_: CurrentUser, db: aiosqlite.Connection = Depends(get_db)
     for root in device_roots:
         _propagate(root)
 
-    # Group root devices: org → groups (Group) → site (Site)
-    tree: dict[str, dict[str, dict[str, list[dict]]]] = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+    # Group root devices: org → groups (Group) → site (Site) → location (Location)
+    tree: dict[str, dict[str, dict[str, dict[str, list[dict]]]]] = defaultdict(
+        lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+    )
     for dev in device_roots:
         org  = dev["org"] or "(Unassigned)"
         grp  = dev["groups"] or "(Unassigned)"
         site = dev["site"] or "(Unassigned)"
-        tree[org][grp][site].append(dev)
+        loc  = dev["location"] or "(Unassigned)"
+        tree[org][grp][site][loc].append(dev)
 
     result: list[dict] = []
     for org_name in sorted(tree):
@@ -802,14 +826,25 @@ async def device_tree(_: CurrentUser, db: aiosqlite.Connection = Depends(get_db)
             grp_alerts = 0
             grp_children: list[dict] = []
             for site_name in sorted(tree[org_name][grp_name]):
-                devs = tree[org_name][grp_name][site_name]
-                site_alerts = sum(d["subtree_alerts"] for d in devs)
+                site_alerts = 0
+                site_children: list[dict] = []
+                for loc_name in sorted(tree[org_name][grp_name][site_name]):
+                    devs = tree[org_name][grp_name][site_name][loc_name]
+                    loc_alerts = sum(d["subtree_alerts"] for d in devs)
+                    site_children.append({
+                        "type": "location",
+                        "name": loc_name,
+                        "direct_alerts": 0,
+                        "subtree_alerts": loc_alerts,
+                        "children": devs,
+                    })
+                    site_alerts += loc_alerts
                 grp_children.append({
                     "type": "site",
                     "name": site_name,
                     "direct_alerts": 0,
                     "subtree_alerts": site_alerts,
-                    "children": devs,
+                    "children": site_children,
                 })
                 grp_alerts += site_alerts
             org_children.append({
@@ -840,7 +875,7 @@ async def export_devices(_: CurrentUser, db: aiosqlite.Connection = Depends(get_
 
     db.row_factory = aiosqlite.Row
     async with db.execute(
-        """SELECT d.name, d.ip, d.org, d.groups, d.site, d.device_type,
+        """SELECT d.name, d.ip, d.org, d.groups, d.site, d.location, d.device_type,
                   d.otelcol_label, d.enabled, d.poll_interval_override, d.ha_role,
                   col.name AS collector_name,
                   cred.name AS credential_name
@@ -854,14 +889,14 @@ async def export_devices(_: CurrentUser, db: aiosqlite.Connection = Depends(get_
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow([
-        "name", "ip", "org", "groups", "site", "device_type",
+        "name", "ip", "org", "groups", "site", "location", "device_type",
         "otelcol_label", "enabled", "poll_interval_override",
         "ha_role", "collector_name", "credential_name",
     ])
     for r in rows:
         writer.writerow([
             r["name"], r["ip"],
-            r["org"] or "", r["groups"] or "", r["site"] or "", r["device_type"] or "",
+            r["org"] or "", r["groups"] or "", r["site"] or "", r["location"] or "", r["device_type"] or "",
             r["otelcol_label"] or "",
             "true" if r["enabled"] else "false",
             r["poll_interval_override"] if r["poll_interval_override"] is not None else "",
@@ -885,7 +920,7 @@ async def import_devices_csv(
     """Import devices from a multipart CSV upload.
 
     CSV columns (header row required):
-      name, ip, org, groups, site, device_type, otelcol_label, enabled,
+      name, ip, org, groups, site, location, device_type, otelcol_label, enabled,
       poll_interval_override, ha_role, collector_name, credential_name
 
     - Rows are inserted; duplicate IPs are skipped (not updated).
@@ -935,15 +970,17 @@ async def import_devices_csv(
         try:
             async with db.execute(
                 """INSERT OR IGNORE INTO devices
-                    (name, ip, org, groups, site, device_type, otelcol_label,
+                    (name, ip, org, groups, site, location, device_type, otelcol_label,
                      enabled, poll_interval_override, ha_role,
-                     collector_id, credential_id)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id""",
+                     collector_id, credential_id,
+                     snmp_version, community, security_level, auth_protocol, priv_protocol)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id""",
                 (
                     name, ip,
                     (row.get("org") or "").strip(),
                     (row.get("groups") or "").strip(),
                     (row.get("site") or "").strip(),
+                    (row.get("location") or "").strip(),
                     (row.get("device_type") or "").strip(),
                     (row.get("otelcol_label") or "").strip() or None,
                     1 if enabled else 0,
@@ -951,6 +988,9 @@ async def import_devices_csv(
                     ha_role,
                     collector_id,
                     credential_id,
+                    # Left blank so the device inherits from its credential — see the
+                    # same note in create_device() above.
+                    "", "", "", "", "",
                 ),
             ) as cur:
                 result_row = await cur.fetchone()
@@ -984,14 +1024,21 @@ async def create_device(body: DeviceCreate, _: AdminUser, db: aiosqlite.Connecti
     try:
         async with db.execute(
             """INSERT INTO devices
-                (name, ip, org, groups, site, device_type, collector_id, credential_id,
+                (name, ip, org, groups, site, location, device_type, collector_id, credential_id,
                  poll_interval_override, otelcol_label, otelcol_pipeline, enabled,
-                 parent_device_id, ha_role, ha_peer_id)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id""",
-            (body.name, body.ip, body.org, body.groups, body.site, body.device_type,
+                 parent_device_id, ha_role, ha_peer_id,
+                 snmp_version, community, security_level, auth_protocol, priv_protocol)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id""",
+            (body.name, body.ip, body.org, body.groups, body.site, body.location, body.device_type,
              body.collector_id, body.credential_id,
              body.poll_interval_override, body.otelcol_label, body.otelcol_pipeline,
-             1 if body.enabled else 0, body.parent_device_id, body.ha_role, body.ha_peer_id),
+             1 if body.enabled else 0, body.parent_device_id, body.ha_role, body.ha_peer_id,
+             # Left blank so the device inherits snmp_version/community/security_level/
+             # auth_protocol/priv_protocol from its linked credential (see poll_engine.py's
+             # _load_devices() / test_device's COALESCE(NULLIF(d.x,''), c.x, default) —
+             # the columns' own NOT NULL DEFAULTs would otherwise always win over the
+             # credential, since only a genuinely empty string falls through.
+             "", "", "", "", ""),
         ) as cur:
             row = await cur.fetchone()
         new_id = row[0]
@@ -1023,13 +1070,13 @@ async def update_device(device_id: int, body: DeviceUpdate, _: AdminUser, db: ai
     d.update(updates)
     new_peer_id = d.get("ha_peer_id")
     await db.execute(
-        """UPDATE devices SET name=?, ip=?, org=?, groups=?, site=?, device_type=?,
+        """UPDATE devices SET name=?, ip=?, org=?, groups=?, site=?, location=?, device_type=?,
             collector_id=?, credential_id=?,
             poll_interval_override=?, otelcol_label=?, otelcol_pipeline=?,
             enabled=?, parent_device_id=?, ha_role=?, ha_peer_id=?,
             updated_at=datetime('now') WHERE id=?""",
         (d.get("name"), d.get("ip"), d.get("org", ""), d.get("groups", ""), d.get("site", ""),
-         d.get("device_type", ""), d.get("collector_id"), d.get("credential_id"),
+         d.get("location", ""), d.get("device_type", ""), d.get("collector_id"), d.get("credential_id"),
          d.get("poll_interval_override"), d.get("otelcol_label"), d.get("otelcol_pipeline"),
          d.get("enabled"), d.get("parent_device_id"), d.get("ha_role"), new_peer_id, device_id),
     )
@@ -1674,9 +1721,14 @@ class SiteDefCreate(BaseModel):
     group_id: int
 
 
+class LocationDefCreate(BaseModel):
+    name: str
+    site_id: int
+
+
 @router.get("/hierarchy")
 async def get_hierarchy(_: CurrentUser, db: aiosqlite.Connection = Depends(get_db)) -> list[dict]:
-    """Return the full org → group → site hierarchy tree."""
+    """Return the full org → group → site → location hierarchy tree."""
     db.row_factory = aiosqlite.Row
     async with db.execute("SELECT id, name FROM orgs ORDER BY name") as cur:
         orgs = [dict(r) for r in await cur.fetchall()]
@@ -1689,7 +1741,13 @@ async def get_hierarchy(_: CurrentUser, db: aiosqlite.Connection = Depends(get_d
             async with db.execute(
                 "SELECT id, name FROM sites_def WHERE group_id=? ORDER BY name", (grp["id"],)
             ) as cur:
-                grp["sites"] = [dict(r) for r in await cur.fetchall()]
+                sites = [dict(r) for r in await cur.fetchall()]
+            for site in sites:
+                async with db.execute(
+                    "SELECT id, name FROM locations_def WHERE site_id=? ORDER BY name", (site["id"],)
+                ) as cur:
+                    site["locations"] = [dict(r) for r in await cur.fetchall()]
+            grp["sites"] = sites
         org["groups"] = groups
     return orgs
 
@@ -1762,7 +1820,7 @@ async def create_site_def(body: SiteDefCreate, _: AdminUser, db: aiosqlite.Conne
         if "UNIQUE" in str(e):
             raise HTTPException(status_code=409, detail=f"Site '{body.name}' already exists in this group")
         raise
-    return {"id": row[0], "name": row[1], "group_id": row[2]}
+    return {"id": row[0], "name": row[1], "group_id": row[2], "locations": []}
 
 
 @router.delete("/hierarchy/sites/{site_id}", status_code=204)
@@ -1771,6 +1829,34 @@ async def delete_site_def(site_id: int, _: AdminUser, db: aiosqlite.Connection =
         if not await cur.fetchone():
             raise HTTPException(status_code=404, detail="Site not found")
     await db.execute("DELETE FROM sites_def WHERE id=?", (site_id,))
+    await db.commit()
+
+
+@router.post("/hierarchy/locations", status_code=201)
+async def create_location_def(body: LocationDefCreate, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)) -> dict:
+    async with db.execute("SELECT id FROM sites_def WHERE id=?", (body.site_id,)) as cur:
+        if not await cur.fetchone():
+            raise HTTPException(status_code=404, detail="Site not found")
+    try:
+        async with db.execute(
+            "INSERT INTO locations_def (site_id, name) VALUES (?,?) RETURNING id, name, site_id",
+            (body.site_id, body.name.strip()),
+        ) as cur:
+            row = await cur.fetchone()
+        await db.commit()
+    except Exception as e:
+        if "UNIQUE" in str(e):
+            raise HTTPException(status_code=409, detail=f"Location '{body.name}' already exists in this site")
+        raise
+    return {"id": row[0], "name": row[1], "site_id": row[2]}
+
+
+@router.delete("/hierarchy/locations/{location_id}", status_code=204)
+async def delete_location_def(location_id: int, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)) -> None:
+    async with db.execute("SELECT id FROM locations_def WHERE id=?", (location_id,)) as cur:
+        if not await cur.fetchone():
+            raise HTTPException(status_code=404, detail="Location not found")
+    await db.execute("DELETE FROM locations_def WHERE id=?", (location_id,))
     await db.commit()
 
 

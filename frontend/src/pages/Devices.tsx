@@ -17,7 +17,8 @@ interface Device {
   id: number; name: string; ip: string
   org: string         // Org (top level)
   groups: string      // Group (second level; DB column 'groups')
-  site: string        // Site (third level; DB column 'site', was 'location')
+  site: string        // Site (third level; DB column 'site')
+  location: string    // Location (fourth level; DB column 'location')
   device_type: string // firewall|switch|wap|wlc|router|iot|ups|server|storage|pdu|camera|load_balancer|vpn|printer|other|''
   collector_id: number; collector_name?: string; credential_id: number | null
   credential_name?: string; cred_snmp_version?: string
@@ -49,7 +50,7 @@ const DEVICE_TYPES = [
 
 interface DeviceFormState {
   name: string; ip: string
-  org: string; groups: string; site: string; device_type: string
+  org: string; groups: string; site: string; location: string; device_type: string
   collector_id: number; credential_id: number | ''
   otelcol_label: string; enabled: boolean; poll_interval_override: string
   parent_device_id: number | ''
@@ -59,7 +60,7 @@ interface DeviceFormState {
 
 const EMPTY_DEVICE: DeviceFormState = {
   name: '', ip: '',
-  org: '', groups: '', site: '', device_type: '',
+  org: '', groups: '', site: '', location: '', device_type: '',
   collector_id: 1, credential_id: '',
   otelcol_label: '', enabled: true, poll_interval_override: '',
   parent_device_id: '',
@@ -83,6 +84,7 @@ function DeviceFormModal({ device, collectors, credentials, allDevices, hierarch
       org: device!.org ?? '',
       groups: device!.groups ?? '',
       site: device!.site ?? '',
+      location: device!.location ?? '',
       device_type: device!.device_type ?? '',
       collector_id: device!.collector_id,
       credential_id: device!.credential_id ?? '',
@@ -110,7 +112,7 @@ function DeviceFormModal({ device, collectors, credentials, allDevices, hierarch
     setSaving(true); setError('')
     const payload = {
       name: form.name, ip: form.ip,
-      org: form.org, groups: form.groups, site: form.site,
+      org: form.org, groups: form.groups, site: form.site, location: form.location,
       device_type: form.device_type,
       collector_id: Number(form.collector_id),
       credential_id: Number(form.credential_id),
@@ -160,24 +162,27 @@ function DeviceFormModal({ device, collectors, credentials, allDevices, hierarch
             </div>
           </div>
 
-          {/* Org / Group / Site — cascading selects from hierarchy definition */}
+          {/* Org / Group / Site / Location — cascading selects from hierarchy definition */}
           {(() => {
             const orgOptions    = hierarchyOrgs.map(o => o.name)
             const selectedOrg   = hierarchyOrgs.find(o => o.name === form.org) ?? null
             const groupOptions  = selectedOrg ? selectedOrg.groups.map(g => g.name) : []
             const selectedGroup = selectedOrg?.groups.find(g => g.name === form.groups) ?? null
             const siteOptions   = selectedGroup ? selectedGroup.sites.map(s => s.name) : []
+            const selectedSite  = selectedGroup?.sites.find(s => s.name === form.site) ?? null
+            const locationOptions = selectedSite ? selectedSite.locations.map(l => l.name) : []
 
             // If a saved value isn't in the hierarchy (device predates hierarchy definition),
             // add it as an option so the form doesn't silently lose it.
-            const orgList    = [...new Set([...(form.org    ? [form.org]    : []), ...orgOptions])]
-            const groupList  = [...new Set([...(form.groups ? [form.groups] : []), ...groupOptions])]
-            const siteList   = [...new Set([...(form.site   ? [form.site]   : []), ...siteOptions])]
+            const orgList      = [...new Set([...(form.org      ? [form.org]      : []), ...orgOptions])]
+            const groupList    = [...new Set([...(form.groups   ? [form.groups]   : []), ...groupOptions])]
+            const siteList     = [...new Set([...(form.site     ? [form.site]     : []), ...siteOptions])]
+            const locationList = [...new Set([...(form.location ? [form.location] : []), ...locationOptions])]
 
             const selectCls = "w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
 
             return (
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-4 gap-4">
                 <div>
                   <label className="text-xs text-gray-400 block mb-1">Org</label>
                   <select
@@ -186,6 +191,7 @@ function DeviceFormModal({ device, collectors, credentials, allDevices, hierarch
                       setF('org', e.target.value)
                       setF('groups', '')
                       setF('site', '')
+                      setF('location', '')
                     }}
                     className={selectCls}
                   >
@@ -203,6 +209,7 @@ function DeviceFormModal({ device, collectors, credentials, allDevices, hierarch
                     onChange={e => {
                       setF('groups', e.target.value)
                       setF('site', '')
+                      setF('location', '')
                     }}
                     disabled={!form.org && groupList.length === 0}
                     className={selectCls}
@@ -215,12 +222,27 @@ function DeviceFormModal({ device, collectors, credentials, allDevices, hierarch
                   <label className="text-xs text-gray-400 block mb-1">Site</label>
                   <select
                     value={form.site}
-                    onChange={e => setF('site', e.target.value)}
+                    onChange={e => {
+                      setF('site', e.target.value)
+                      setF('location', '')
+                    }}
                     disabled={!form.groups && siteList.length === 0}
                     className={selectCls}
                   >
                     <option value="">— unassigned —</option>
                     {siteList.map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Location</label>
+                  <select
+                    value={form.location}
+                    onChange={e => setF('location', e.target.value)}
+                    disabled={!form.site && locationList.length === 0}
+                    className={selectCls}
+                  >
+                    <option value="">— unassigned —</option>
+                    {locationList.map(n => <option key={n} value={n}>{n}</option>)}
                   </select>
                 </div>
               </div>
@@ -410,11 +432,11 @@ export default function Devices() {
 
   const handleDownloadTemplate = () => {
     const rows = [
-      ['name', 'ip', 'org', 'groups', 'site', 'device_type', 'otelcol_label', 'enabled', 'poll_interval_override', 'ha_role', 'collector_name', 'credential_name'],
-      ['Core-FW-01',   '10.0.0.1',  'YourOrg', 'Site1',    'MDF',   'firewall', 'SITE1/FW1', 'true',  '',   'active', 'Local Collector', 'v2c-public'],
-      ['Core-SW-01',   '10.0.0.2',  'YourOrg', 'Site1',    'MDF',   'switch',   'SITE1/SW1', 'true',  '60', '',       'Local Collector', 'v2c-public'],
-      ['Access-WAP-01','10.0.1.10', 'YourOrg', 'Branch-A', 'IDF-1', 'wap',      '',          'true',  '',   '',       'Local Collector', 'v3-secure'],
-      ['UPS-Main',     '10.0.2.5',  'YourOrg', 'Site1',    'MDF',   'ups',      '',          'true',  '',   '',       'Local Collector', 'v2c-public'],
+      ['name', 'ip', 'org', 'groups', 'site', 'location', 'device_type', 'otelcol_label', 'enabled', 'poll_interval_override', 'ha_role', 'collector_name', 'credential_name'],
+      ['Core-FW-01',   '10.0.0.1',  'YourOrg', 'RegionA', 'Site1',    'MDF',   'firewall', 'SITE1/FW1', 'true',  '',   'active', 'Local Collector', 'v2c-public'],
+      ['Core-SW-01',   '10.0.0.2',  'YourOrg', 'RegionA', 'Site1',    'MDF',   'switch',   'SITE1/SW1', 'true',  '60', '',       'Local Collector', 'v2c-public'],
+      ['Access-WAP-01','10.0.1.10', 'YourOrg', 'RegionA', 'Branch-A', 'IDF-1', 'wap',      '',          'true',  '',   '',       'Local Collector', 'v3-secure'],
+      ['UPS-Main',     '10.0.2.5',  'YourOrg', 'RegionA', 'Site1',    'MDF',   'ups',      '',          'true',  '',   '',       'Local Collector', 'v2c-public'],
     ]
     const csv = rows.map(r => r.map(v => `"${v}"`).join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
@@ -460,6 +482,7 @@ export default function Devices() {
       || (d.org ?? '').toLowerCase().includes(q)
       || (d.groups ?? '').toLowerCase().includes(q)
       || (d.site ?? '').toLowerCase().includes(q)
+      || (d.location ?? '').toLowerCase().includes(q)
   })
 
   const statusDot = (s: string, enabled: number) => {
@@ -563,9 +586,9 @@ export default function Devices() {
                         }`}>{d.ha_role}</span>
                       )}
                     </div>
-                    {(d.org || d.groups || d.site) && (
+                    {(d.org || d.groups || d.site || d.location) && (
                       <p className="text-xs text-gray-500 mt-0.5">
-                        {[d.org, d.groups, d.site].filter(Boolean).join(' › ')}
+                        {[d.org, d.groups, d.site, d.location].filter(Boolean).join(' › ')}
                       </p>
                     )}
                   </td>
