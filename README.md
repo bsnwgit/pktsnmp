@@ -478,6 +478,18 @@ Supported notification channels: `inapp`, `email`, `slack`, `pagerduty`, `webhoo
 
 **Alerts → Active** and **Alerts → History**, and the **Application Logs** page, all share the same search + time-range filter bar: a text search, a severity/level filter, and a time-range dropdown (1h/6h/24h/7d/30d/All time, plus **Custom range…**). Custom range shows two date/time pickers, defaulting to today's 12:00 AM–11:59 PM; it validates that the end is after the start (including same-day-earlier-end-time) and clamps both sides so neither can be set in the future — an invalid combination shows an inline error instead of silently applying. All timestamps rendered anywhere in the app (alert events, device last-seen, users' last login, chart axes) are explicitly normalized to UTC before parsing, so they display correctly regardless of the browser's local timezone. All 12 built-in rule types are deletable — none are permanently protected by id.
 
+### Investigate button
+
+Every alert event card (Active and History) has an **Investigate ↗** button that deep-links straight to the relevant view for that rule, scoped to a time window around when it fired:
+
+- Device / interface / metric / threshold rules → **Metrics** page for that device, with the time range widened to comfortably cover the alert's evaluation window (1h/6h/24h/7d, picked automatically from the rule's window).
+- `collector_gap` → **Collectors** page, with the specific collector's row highlighted and scrolled into view (auto-clears after a few seconds).
+- Trap-related rules (`unknown_trap_source`, `trap_rate_spike`, `trap_oid_match`, `trap_received`) → **Dashboard**, since there's no dedicated trap explorer page yet — the Dashboard's recent-traps widget is the closest available view.
+
+### Application Logs pagination
+
+The **Application Logs** page paginates server-side (50 rows/page) instead of loading everything at once. The page-number bar sits above the table: a sliding window of 5 page numbers that follows the current page (Next from page 5 jumps to 6-10, Prev works the same way in reverse), plus a `1 ..` shortcut back to the first page once you're past the first block, and a `.. N` shortcut to the last page. Changing any filter (level, logger, search, time range) resets back to page 1.
+
 ---
 
 ## Device Hierarchy
