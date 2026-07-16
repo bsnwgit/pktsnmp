@@ -25,44 +25,51 @@ interface RatePoint {
   outBps: number | null
 }
 
-function computeRates(series: MetricPoint[]): RatePoint[] {
-  const byLabel: Record<string, MetricPoint[]> = {}
+/**
+ * Interface-indexed counters (ifInOctets/ifOutOctets) carry a distinct
+ * interface_label per physical port — this panel shows the whole device, so
+ * `series` has every port's samples interleaved. Diffing across two different
+ * ports' counters is meaningless, so each port is diffed independently and the
+ * resulting per-port rates are summed per timestamp to get device-wide throughput.
+ */
+function sumPerInterfaceRate(series: MetricPoint[], oidLabel: string): Map<string, number> {
+  const byIface = new Map<string, MetricPoint[]>()
   for (const p of series) {
-    if (!byLabel[p.oid_label]) byLabel[p.oid_label] = []
-    byLabel[p.oid_label].push(p)
+    if (p.oid_label !== oidLabel) continue
+    const key = p.interface_label ?? ''
+    const list = byIface.get(key)
+    if (list) list.push(p)
+    else byIface.set(key, [p])
   }
 
-  const inPts  = byLabel['ifInOctets']  || []
-  const outPts = byLabel['ifOutOctets'] || []
-
-  // Build a timestamp-keyed map for alignment
-  const timestamps = [...new Set([
-    ...inPts.map(p => p.bucket_ts),
-    ...outPts.map(p => p.bucket_ts),
-  ])].sort()
-
-  const inMap  = Object.fromEntries(inPts.map(p  => [p.bucket_ts, p.max_value]))
-  const outMap = Object.fromEntries(outPts.map(p => [p.bucket_ts, p.max_value]))
-
-  const rates: RatePoint[] = []
-  for (let i = 1; i < timestamps.length; i++) {
-    const t1 = new Date(timestamps[i - 1]).getTime()
-    const t2 = new Date(timestamps[i]).getTime()
-    const dtSec = (t2 - t1) / 1000
-    if (dtSec <= 0) continue
-
-    const in1 = inMap[timestamps[i - 1]]
-    const in2 = inMap[timestamps[i]]
-    const out1 = outMap[timestamps[i - 1]]
-    const out2 = outMap[timestamps[i]]
-
-    // Null on counter reset (negative delta)
-    const inBps  = (in1  != null && in2  != null && in2  >= in1)  ? (in2  - in1)  / dtSec : null
-    const outBps = (out1 != null && out2 != null && out2 >= out1) ? (out2 - out1) / dtSec : null
-
-    rates.push({ t: t2, inBps, outBps })
+  const totals = new Map<string, number>()
+  for (const rows of byIface.values()) {
+    rows.sort((a, b) => a.bucket_ts.localeCompare(b.bucket_ts))
+    for (let i = 1; i < rows.length; i++) {
+      const prev = rows[i - 1]
+      const row = rows[i]
+      if (prev.max_value == null || row.max_value == null) continue
+      const dtSec = (new Date(row.bucket_ts).getTime() - new Date(prev.bucket_ts).getTime()) / 1000
+      if (dtSec <= 0) continue
+      const delta = row.max_value - prev.max_value
+      if (delta < 0) continue // counter reset
+      totals.set(row.bucket_ts, (totals.get(row.bucket_ts) ?? 0) + delta / dtSec)
+    }
   }
-  return rates
+  return totals
+}
+
+function computeRates(series: MetricPoint[]): RatePoint[] {
+  const inTotals  = sumPerInterfaceRate(series, 'ifInOctets')
+  const outTotals = sumPerInterfaceRate(series, 'ifOutOctets')
+
+  const timestamps = [...new Set([...inTotals.keys(), ...outTotals.keys()])].sort()
+
+  return timestamps.map(ts => ({
+    t: new Date(ts).getTime(),
+    inBps:  inTotals.get(ts)  ?? null,
+    outBps: outTotals.get(ts) ?? null,
+  }))
 }
 
 // ── Formatting ────────────────────────────────────────────────────────────────

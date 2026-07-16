@@ -13,7 +13,7 @@ import {
 } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
-  ComposedChart, Line, XAxis, YAxis,
+  AreaChart, Area, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend,
 } from 'recharts'
 import {
@@ -146,24 +146,61 @@ function tsShort(ms: number): string {
   return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
-/** Compute bits/sec rates from adjacent counter rows */
+/**
+ * Compute bits/sec rates from adjacent counter rows.
+ *
+ * Interface-indexed counters (ifInOctets, etc.) carry a distinct interface_label
+ * per physical port. When no single interface is selected, `series` contains
+ * every port's samples interleaved — diffing across two different ports'
+ * counters is meaningless, so each port's counter is diffed independently and
+ * the resulting per-port rates are summed per bucket to get device-wide throughput.
+ * When the view is already scoped to one interface (or the OID is a scalar with
+ * a single blank interface_label), this reduces to the original single-series behavior.
+ */
 function computeRates(
   series: MetricPoint[],
   oid: string,
 ): Array<{ bucket_ts: string; rate: number | null }> {
-  const rows = series
-    .filter(r => r.oid_label === oid)
-    .sort((a, b) => a.bucket_ts.localeCompare(b.bucket_ts))
-  return rows.map((row, i) => {
-    if (i === 0) return { bucket_ts: row.bucket_ts, rate: null }
-    const prev = rows[i - 1]
-    if (prev.max_value === null || row.max_value === null) return { bucket_ts: row.bucket_ts, rate: null }
-    const dt = (new Date(row.bucket_ts).getTime() - new Date(prev.bucket_ts).getTime()) / 1000
-    if (dt <= 0) return { bucket_ts: row.bucket_ts, rate: null }
-    const delta = row.max_value - prev.max_value
-    if (delta < 0) return { bucket_ts: row.bucket_ts, rate: null } // counter reset
-    return { bucket_ts: row.bucket_ts, rate: (delta * 8) / dt }    // bits/sec
-  })
+  const byIface = new Map<string, MetricPoint[]>()
+  for (const r of series) {
+    if (r.oid_label !== oid) continue
+    const key = r.interface_label ?? ''
+    const list = byIface.get(key)
+    if (list) list.push(r)
+    else byIface.set(key, [r])
+  }
+
+  const totals = new Map<string, number>()
+  for (const rows of byIface.values()) {
+    rows.sort((a, b) => a.bucket_ts.localeCompare(b.bucket_ts))
+    for (let i = 1; i < rows.length; i++) {
+      const prev = rows[i - 1]
+      const row = rows[i]
+      if (prev.max_value === null || row.max_value === null) continue
+      const dt = (new Date(row.bucket_ts).getTime() - new Date(prev.bucket_ts).getTime()) / 1000
+      if (dt <= 0) continue
+      const delta = row.max_value - prev.max_value
+      if (delta < 0) continue // counter reset
+      totals.set(row.bucket_ts, (totals.get(row.bucket_ts) ?? 0) + (delta * 8) / dt) // bits/sec
+    }
+  }
+
+  return [...totals.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([bucket_ts, rate]) => ({ bucket_ts, rate }))
+}
+
+// Different OIDs in the same poll cycle are fetched via separate SNMP round
+// trips a few hundred ms apart, so their raw bucket_ts strings never match
+// exactly. Rounding to a small shared window aligns same-cycle samples from
+// different OIDs onto one row without merging genuinely different poll
+// cycles (which are ~60s apart) — this only matters for the raw/unbucketed
+// (bucket_seconds=0, ≤1h) view; server-bucketed views already floor every
+// OID's timestamp to the same window so this is a no-op there.
+const TS_ALIGN_MS = 2000
+function alignTs(ts: string): number {
+  const ms = new Date(ts).getTime()
+  return Math.round(ms / TS_ALIGN_MS) * TS_ALIGN_MS
 }
 
 /** Build unified timestamp-keyed timeline for a group of OIDs */
@@ -172,21 +209,21 @@ function buildTimeline(
   oids: readonly string[],
   isRate: boolean,
 ): Record<string, number | null>[] {
-  const byOid: Record<string, Map<string, number | null>> = {}
+  const byOid: Record<string, Map<number, number | null>> = {}
   for (const oid of oids) {
     if (isRate && OID_META[oid]?.isCounter) {
       const rates = computeRates(series, oid)
-      byOid[oid] = new Map(rates.map(r => [r.bucket_ts, r.rate]))
+      byOid[oid] = new Map(rates.map(r => [alignTs(r.bucket_ts), r.rate]))
     } else {
       byOid[oid] = new Map(
-        series.filter(r => r.oid_label === oid).map(r => [r.bucket_ts, r.avg_value])
+        series.filter(r => r.oid_label === oid).map(r => [alignTs(r.bucket_ts), r.avg_value])
       )
     }
   }
   const relevant = series.filter(r => oids.includes(r.oid_label))
-  const allTs = [...new Set(relevant.map(r => r.bucket_ts))].sort()
+  const allTs = [...new Set(relevant.map(r => alignTs(r.bucket_ts)))].sort((a, b) => a - b)
   return allTs.map(ts => {
-    const row: Record<string, number | null> = { ts: new Date(ts).getTime() }
+    const row: Record<string, number | null> = { ts }
     for (const oid of oids) row[oid] = byOid[oid]?.get(ts) ?? null
     return row
   })
@@ -209,8 +246,12 @@ interface ChartSectionProps {
   alertEvents?: MetricsHistoryResponse['alert_events']
 }
 
+function groupHasData(data: Record<string, number | null>[], oids: readonly string[]): boolean {
+  return data.length > 0 && data.some(r => oids.some(o => r[o] !== null))
+}
+
 function ChartSection({ title, data, oids, colors, unit, alertEvents = [] }: ChartSectionProps) {
-  const hasData = data.length > 0 && data.some(r => oids.some(o => r[o] !== null))
+  const hasData = groupHasData(data, oids)
   return (
     <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">
       <div className="flex items-center justify-between mb-3">
@@ -220,22 +261,30 @@ function ChartSection({ title, data, oids, colors, unit, alertEvents = [] }: Cha
         )}
       </div>
       {hasData ? (
-        <ResponsiveContainer width="100%" height={160}>
-          <ComposedChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+        <ResponsiveContainer width="100%" height={180}>
+          <AreaChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+            <defs>
+              {oids.map((oid, i) => (
+                <linearGradient key={oid} id={`grad-${oid}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor={colors[i] ?? '#6b7280'} stopOpacity={0.3} />
+                  <stop offset="95%" stopColor={colors[i] ?? '#6b7280'} stopOpacity={0} />
+                </linearGradient>
+              ))}
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" vertical={false} />
             <XAxis
               dataKey="ts"
               type="number"
               scale="time"
               domain={['dataMin', 'dataMax']}
               tickFormatter={tsShort}
-              tick={{ fontSize: 10, fill: '#6b7280' }}
+              tick={{ fontSize: 10, fill: '#d1d5db' }}
               axisLine={false}
               tickLine={false}
             />
             <YAxis
               tickFormatter={v => fmt(v, unit)}
-              tick={{ fontSize: 10, fill: '#6b7280' }}
+              tick={{ fontSize: 10, fill: '#d1d5db' }}
               axisLine={false}
               tickLine={false}
               width={60}
@@ -251,13 +300,14 @@ function ChartSection({ title, data, oids, colors, unit, alertEvents = [] }: Cha
               formatter={(name: string) => OID_META[name]?.label ?? name}
             />
             {oids.map((oid, i) => (
-              <Line
+              <Area
                 key={oid}
                 type="monotone"
                 dataKey={oid}
                 stroke={colors[i] ?? '#6b7280'}
+                fill={`url(#grad-${oid})`}
                 dot={false}
-                strokeWidth={1.5}
+                strokeWidth={2}
                 connectNulls={false}
               />
             ))}
@@ -269,7 +319,7 @@ function ChartSection({ title, data, oids, colors, unit, alertEvents = [] }: Cha
                 strokeDasharray="4 2"
               />
             ))}
-          </ComposedChart>
+          </AreaChart>
         </ResponsiveContainer>
       ) : (
         <div className="h-40 flex items-center justify-center text-sm text-gray-600 border border-dashed border-gray-800 rounded-lg">
@@ -400,19 +450,24 @@ function DeviceCard({ card, onClick }: { card: DeviceMetricsCard; onClick: () =>
 }
 
 function IfaceRow({
-  iface, selected, onClick,
+  iface, selected, onClick, onHide,
 }: {
   iface: DeviceInterface | null
   selected: boolean
   onClick: () => void
+  onHide?: (label: string) => void
 }) {
-  const base = `w-full text-left px-3 py-2 rounded-lg text-sm transition-colors`
+  const base = `w-full text-left px-3 py-2 rounded-lg text-sm transition-colors group`
   const cls  = selected
     ? `${base} bg-blue-600/20 text-blue-300 border border-blue-500/30`
     : `${base} text-gray-400 hover:bg-gray-800/60`
 
   if (!iface) {
-    return <button onClick={onClick} className={cls}>All interfaces</button>
+    return (
+      <div onClick={onClick} role="button" tabIndex={0} className={cls}>
+        All interfaces
+      </div>
+    )
   }
 
   const dot = iface.oper_status === 'up'
@@ -422,13 +477,26 @@ function IfaceRow({
     : 'bg-gray-500'
 
   return (
-    <button onClick={onClick} className={cls}>
+    <div onClick={onClick} role="button" tabIndex={0} className={cls}>
       <div className="flex items-center gap-2">
         <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dot}`} />
-        <span className="truncate font-medium">{iface.name}</span>
+        <span className="truncate font-medium flex-1">{iface.name}</span>
+        {onHide && (
+          <button
+            onClick={e => { e.stopPropagation(); onHide(iface.interface_label) }}
+            title="Hide this interface"
+            className="flex-shrink-0 opacity-0 group-hover:opacity-100 text-gray-500 hover:text-gray-200 transition-opacity px-1"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.451 10.451 0 0112 4.5c4.756 0 8.774 3.162 10.066 7.498a10.522 10.522 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
+            </svg>
+          </button>
+        )}
       </div>
-      {(iface.speed_mbps || iface.admin_status === 'down') && (
-        <p className="text-xs text-gray-600 pl-3.5 mt-0.5">
+      {(iface.description || iface.speed_mbps || iface.admin_status === 'down') && (
+        <p className="text-xs text-gray-600 pl-3.5 mt-0.5 truncate">
+          {iface.description ? `${iface.interface_label}` : ''}
+          {iface.description && iface.speed_mbps ? ' · ' : ''}
           {iface.speed_mbps
             ? (iface.speed_mbps >= 1000
                 ? `${(iface.speed_mbps / 1000).toFixed(0)} Gbps`
@@ -437,7 +505,7 @@ function IfaceRow({
           {iface.admin_status === 'down' ? ' · disabled' : ''}
         </p>
       )}
-    </button>
+    </div>
   )
 }
 
@@ -467,7 +535,21 @@ export default function MetricsPage() {
   const [searchQ, setSearchQ]             = useState('')
   const [typeFilter, setTypeFilter]       = useState('')
   const [orgFilter, setOrgFilter]         = useState('')
+  const [hiddenIfaces, setHiddenIfaces]   = useState<Set<string>>(new Set())
   const histAbort = useRef<AbortController | null>(null)
+
+  const hiddenKey = (devId: number) => `pktsnmp:hiddenInterfaces:${devId}`
+
+  // Load per-device hidden-interface set whenever the selected device changes
+  useEffect(() => {
+    if (!selectedDeviceId) { setHiddenIfaces(new Set()); return }
+    try {
+      const raw = localStorage.getItem(hiddenKey(selectedDeviceId))
+      setHiddenIfaces(new Set(raw ? JSON.parse(raw) : []))
+    } catch {
+      setHiddenIfaces(new Set())
+    }
+  }, [selectedDeviceId])
 
   // URL sync on mount
   useEffect(() => {
@@ -489,6 +571,26 @@ export default function MetricsPage() {
     if (ifLabel) p.iflabel  = ifLabel
     setSearchParams(p, { replace: true })
   }, [since, setSearchParams])
+
+  const hideInterface = useCallback((label: string) => {
+    if (!selectedDeviceId) return
+    setHiddenIfaces(prev => {
+      const next = new Set(prev)
+      next.add(label)
+      localStorage.setItem(hiddenKey(selectedDeviceId), JSON.stringify([...next]))
+      return next
+    })
+    // Don't leave the view stranded on an interface that just got hidden
+    if (selectedIfLabel === label) {
+      setSelIf(null); setViewMode('device'); pushUrl('device', selectedDeviceId)
+    }
+  }, [selectedDeviceId, selectedIfLabel, pushUrl])
+
+  const resetHiddenInterfaces = useCallback(() => {
+    if (!selectedDeviceId) return
+    localStorage.removeItem(hiddenKey(selectedDeviceId))
+    setHiddenIfaces(new Set())
+  }, [selectedDeviceId])
 
   // Load overview
   useEffect(() => {
@@ -538,10 +640,6 @@ export default function MetricsPage() {
     setSearchParams({}, { replace: true })
   }, [setSearchParams])
 
-  const goBackToDevice = useCallback(() => {
-    setSelIf(null); setViewMode('device'); pushUrl('device', selectedDeviceId!)
-  }, [selectedDeviceId, pushUrl])
-
   const selectedCard  = useMemo(() => overviewCards.find(c => c.device.id === selectedDeviceId) ?? null, [overviewCards, selectedDeviceId])
   const selectedIface = useMemo(() => interfaces.find(i => i.interface_label === selectedIfLabel) ?? null, [interfaces, selectedIfLabel])
 
@@ -562,7 +660,12 @@ export default function MetricsPage() {
     noData: overviewCards.filter(c => !c.has_data).length,
   }), [overviewCards])
 
-  const series = history?.series ?? []
+  // Exclude hidden interfaces from the combined "All interfaces" totals — scalar
+  // rows (no interface_label) are device-wide metrics and are never hidden.
+  const series = useMemo(
+    () => (history?.series ?? []).filter(r => !r.interface_label || !hiddenIfaces.has(r.interface_label)),
+    [history, hiddenIfaces],
+  )
   const chartData = useMemo(() => ({
     traffic:    buildTimeline(series, OID_GROUPS.traffic.oids,    true),
     packets:    buildTimeline(series, OID_GROUPS.packets.oids,    true),
@@ -589,10 +692,18 @@ export default function MetricsPage() {
             </button>
             {selectedCard && <>
               <span className="text-gray-600">/</span>
-              {viewMode === 'device'
-                ? <span className="text-gray-200 font-medium truncate max-w-[200px]">{selectedCard.device.name}</span>
-                : <button onClick={goBackToDevice} className="text-blue-400 hover:text-blue-300 truncate max-w-[160px]">{selectedCard.device.name}</button>
-              }
+              <select
+                value={selectedCard.device.id}
+                onChange={e => goDevice(Number(e.target.value))}
+                title="Switch device"
+                className="bg-transparent text-gray-200 font-medium text-sm rounded px-1 py-0.5 max-w-[200px] cursor-pointer hover:bg-gray-800/60 focus:outline-none focus:ring-1 focus:ring-blue-500/40 border-none"
+              >
+                {overviewCards.filter(c => c.device.enabled).map(c => (
+                  <option key={c.device.id} value={c.device.id} className="bg-gray-900 text-gray-200">
+                    {c.device.name}
+                  </option>
+                ))}
+              </select>
             </>}
             {selectedIface && <>
               <span className="text-gray-600">/</span>
@@ -717,6 +828,14 @@ export default function MetricsPage() {
                 <StatusDot status={selectedCard.device.status} />
                 <span className="text-xs text-gray-500 capitalize">{selectedCard.device.status}</span>
               </div>
+              {hiddenIfaces.size > 0 && (
+                <button
+                  onClick={resetHiddenInterfaces}
+                  className="mt-2 text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                >
+                  Reset {hiddenIfaces.size} hidden interface{hiddenIfaces.size !== 1 ? 's' : ''}
+                </button>
+              )}
             </div>
 
             {/* Interface list */}
@@ -736,10 +855,11 @@ export default function MetricsPage() {
               {!ifLoading && interfaces.length === 0 && (
                 <p className="text-xs text-gray-600 px-3 py-2">No interface data available</p>
               )}
-              {interfaces.map(iface => (
+              {interfaces.filter(iface => !hiddenIfaces.has(iface.interface_label)).map(iface => (
                 <IfaceRow key={iface.interface_label} iface={iface}
                   selected={selectedIfLabel === iface.interface_label}
                   onClick={() => goInterface(iface.interface_label)}
+                  onHide={hideInterface}
                 />
               ))}
             </div>
@@ -756,6 +876,9 @@ export default function MetricsPage() {
                     <div>
                       <p className="text-xs text-gray-500 mb-0.5">Interface</p>
                       <p className="font-semibold text-gray-100">{selectedIface.name}</p>
+                      {selectedIface.description && (
+                        <p className="text-xs text-gray-500">{selectedIface.interface_label}</p>
+                      )}
                       {selectedIface.if_type && (
                         <p className="text-xs text-gray-500">Type: {selectedIface.if_type}</p>
                       )}
@@ -877,30 +1000,36 @@ export default function MetricsPage() {
               unit="/s"
               alertEvents={history?.alert_events}
             />
-            <ChartSection
-              title="PAN-OS Interface Traffic (bits/sec)"
-              data={chartData.panTraffic}
-              oids={OID_GROUPS.panTraffic.oids}
-              colors={OID_GROUPS.panTraffic.color}
-              unit="bps"
-              alertEvents={history?.alert_events}
-            />
-            <ChartSection
-              title="PAN-OS Interface Packets (per sec)"
-              data={chartData.panPackets}
-              oids={OID_GROUPS.panPackets.oids}
-              colors={OID_GROUPS.panPackets.color}
-              unit="pkt/s"
-              alertEvents={history?.alert_events}
-            />
-            <ChartSection
-              title="PAN-OS Firewall Health (CPU %, Sessions)"
-              data={chartData.panFirewall}
-              oids={OID_GROUPS.panFirewall.oids}
-              colors={OID_GROUPS.panFirewall.color}
-              unit=""
-              alertEvents={history?.alert_events}
-            />
+            {groupHasData(chartData.panTraffic, OID_GROUPS.panTraffic.oids) && (
+              <ChartSection
+                title="PAN-OS Interface Traffic (bits/sec)"
+                data={chartData.panTraffic}
+                oids={OID_GROUPS.panTraffic.oids}
+                colors={OID_GROUPS.panTraffic.color}
+                unit="bps"
+                alertEvents={history?.alert_events}
+              />
+            )}
+            {groupHasData(chartData.panPackets, OID_GROUPS.panPackets.oids) && (
+              <ChartSection
+                title="PAN-OS Interface Packets (per sec)"
+                data={chartData.panPackets}
+                oids={OID_GROUPS.panPackets.oids}
+                colors={OID_GROUPS.panPackets.color}
+                unit="pkt/s"
+                alertEvents={history?.alert_events}
+              />
+            )}
+            {groupHasData(chartData.panFirewall, OID_GROUPS.panFirewall.oids) && (
+              <ChartSection
+                title="PAN-OS Firewall Health (CPU %, Sessions)"
+                data={chartData.panFirewall}
+                oids={OID_GROUPS.panFirewall.oids}
+                colors={OID_GROUPS.panFirewall.color}
+                unit=""
+                alertEvents={history?.alert_events}
+              />
+            )}
 
             {/* Alert event log */}
             {(history?.alert_events?.length ?? 0) > 0 && (
