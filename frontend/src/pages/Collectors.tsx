@@ -7,6 +7,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { getToken, api, IngestRateBucket } from '../api/client'
 
+interface CollectorImportResult {
+  created: number
+  skipped: number
+  errors: string[]
+  tokens: { id: number; name: string; api_token: string }[]
+}
+
 interface Collector {
   id: number
   name: string
@@ -39,12 +46,8 @@ interface Collector {
 
 const fmtRelative = (ts: string | null) => {
   if (!ts) return 'Never'
-  const secs = Math.floor((Date.now() - new Date(ts + 'Z').getTime()) / 1000)
-  if (secs < 0) return 'just now'
-  if (secs < 60) return `${secs}s ago`
-  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`
-  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`
-  return `${Math.floor(secs / 86400)}d ago`
+  const utc = ts.includes('T') || ts.endsWith('Z') ? ts : ts.replace(' ', 'T') + 'Z'
+  return new Date(utc).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
 }
 
 const statusDot = (s: string) =>
@@ -392,6 +395,9 @@ export default function Collectors() {
   const [syncing, setSyncing]       = useState<number | null>(null)
   const [syncResult, setSyncResult] = useState<{ id: number; ok: boolean; message: string } | null>(null)
   const [ingestRates, setIngestRates] = useState<Record<number, IngestRateBucket[]>>({})
+  const [exporting, setExporting]   = useState(false)
+  const [importResult, setImportResult] = useState<CollectorImportResult | null>(null)
+  const importFileRef                   = useRef<HTMLInputElement>(null)
 
   const authHeader = () => ({ Authorization: `Bearer ${getToken() ?? ''}`, 'Content-Type': 'application/json' })
 
@@ -458,6 +464,38 @@ export default function Collectors() {
     } finally { setSyncing(null) }
   }
 
+  const handleDownloadTemplate = () => {
+    const rows = [
+      ['name', 'description', 'ip'],
+      ['collector-branch-a', 'Remote otelcol collector — Branch A', '10.0.1.5'],
+      ['collector-branch-b', 'Remote otelcol collector — Branch B', '10.0.2.5'],
+    ]
+    const csv = rows.map(r => r.map(v => `"${v}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = 'pktsnmp-collectors-template.csv'; a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleExport = async () => {
+    setExporting(true)
+    try { await api.exportCollectors() }
+    catch (e: any) { setError(e.message) }
+    finally { setExporting(false) }
+  }
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    try {
+      const result = await api.importCollectors(file)
+      setImportResult(result)
+      if (result.created > 0) await load()
+    } catch (e: any) { setError(e.message) }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -465,10 +503,28 @@ export default function Collectors() {
           <h1 className="text-lg font-semibold text-white">Collectors</h1>
           <p className="text-xs text-gray-500 mt-0.5">Manage remote otelcol collectors and the built-in local collector</p>
         </div>
-        <button onClick={() => setShowAdd(v => !v)}
-          className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">
-          + Add Collector
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={handleExport} disabled={exporting}
+            className="px-3 py-2 text-sm bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors disabled:opacity-50">
+            {exporting ? 'Exporting…' : '↓ Export CSV'}
+          </button>
+          <div className="flex items-center gap-1">
+            <button onClick={() => importFileRef.current?.click()}
+              className="px-3 py-2 text-sm bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors rounded-r-none border-r border-gray-600">
+              ↑ Import CSV
+            </button>
+            <button onClick={handleDownloadTemplate} title="Download CSV template"
+              className="px-2 py-2 text-sm bg-gray-700 hover:bg-gray-600 text-gray-400 hover:text-white rounded-lg transition-colors rounded-l-none"
+              aria-label="Download template">
+              template
+            </button>
+          </div>
+          <input ref={importFileRef} type="file" accept=".csv" className="hidden" onChange={handleImportFile} />
+          <button onClick={() => setShowAdd(v => !v)}
+            className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">
+            + Add Collector
+          </button>
+        </div>
       </div>
 
       {/* New token banner */}
@@ -677,6 +733,60 @@ export default function Collectors() {
           collectorName={preview.name}
           onClose={() => setPreview(null)}
         />
+      )}
+
+      {importResult && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 py-8 px-4" onClick={() => setImportResult(null)}>
+          <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 max-w-lg w-full" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold text-white mb-3">Import complete</h3>
+            <div className="space-y-1 mb-4">
+              <p className="text-sm text-green-400">✓ {importResult.created} collector{importResult.created !== 1 ? 's' : ''} created</p>
+              {importResult.skipped > 0 && (
+                <p className="text-sm text-yellow-400">⚠ {importResult.skipped} row{importResult.skipped !== 1 ? 's' : ''} skipped</p>
+              )}
+            </div>
+
+            {importResult.tokens.length > 0 && (
+              <div className="bg-amber-900/20 border border-amber-700/40 rounded-lg p-3 mb-4 space-y-2">
+                <p className="text-xs font-semibold text-amber-400">⚠ Tokens shown once — copy them now</p>
+                <div className="max-h-40 overflow-y-auto space-y-1.5">
+                  {importResult.tokens.map(t => (
+                    <div key={t.id} className="flex items-center gap-2">
+                      <span className="text-xs text-gray-300 w-28 truncate flex-shrink-0" title={t.name}>{t.name}</span>
+                      <input readOnly value={t.api_token}
+                        className="flex-1 min-w-0 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-white font-mono" />
+                      <button onClick={() => navigator.clipboard.writeText(t.api_token)}
+                        className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded flex-shrink-0">Copy</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {importResult.errors.length > 0 && (
+              <div className="bg-gray-800 rounded-lg px-3 py-2 max-h-36 overflow-y-auto mb-4">
+                {importResult.errors.map((e, i) => (
+                  <p key={i} className="text-xs text-red-400 font-mono">{e}</p>
+                ))}
+              </div>
+            )}
+            <div className="bg-gray-800/60 rounded-lg px-3 py-2 mb-4">
+              <p className="text-xs font-medium text-gray-400 mb-1">CSV columns (header row required)</p>
+              <p className="text-xs font-mono text-gray-500 break-all">name, description, ip</p>
+              <p className="text-xs text-gray-600 mt-1">
+                SSH credentials aren't imported via CSV — configure those per-collector afterward with the SSH button.
+              </p>
+            </div>
+            <div className="flex items-center justify-between">
+              <button onClick={handleDownloadTemplate} className="text-xs text-blue-400 hover:text-blue-300 transition-colors">
+                ↓ Download template
+              </button>
+              <button onClick={() => setImportResult(null)} className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg">
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

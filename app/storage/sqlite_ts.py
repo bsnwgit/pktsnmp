@@ -602,6 +602,15 @@ class SQLiteStorage(StorageBase):
             row = await cur.fetchone()
         return row["last_poll"] if row else None
 
+    async def get_collector_last_poll(self, collector_id: int) -> str | None:
+        """Return the most recent polled_at for a collector (for collector_gap check)."""
+        async with self._conn.execute(
+            "SELECT MAX(polled_at) AS last_poll FROM snmp_poll_results WHERE collector_id = ?",
+            [collector_id],
+        ) as cur:
+            row = await cur.fetchone()
+        return row["last_poll"] if row else None
+
     async def get_device_interfaces(self, device_id: int) -> list[dict]:
         """Return the interface list for a device using interface_label.
 

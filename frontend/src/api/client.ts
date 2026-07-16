@@ -229,6 +229,63 @@ export const api = {
     return res.json()
   },
 
+  exportCollectors: async (): Promise<void> => {
+    const headers: Record<string, string> = {}
+    if (_accessToken) headers['Authorization'] = `Bearer ${_accessToken}`
+    const res = await fetch('/api/snmp/collectors/export', { headers })
+    if (!res.ok) throw new Error(`Export failed: ${res.status}`)
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'pktsnmp-collectors.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+  },
+
+  importCollectors: async (file: File): Promise<{
+    created: number; skipped: number; errors: string[]
+    tokens: { id: number; name: string; api_token: string }[]
+  }> => {
+    const formData = new FormData()
+    formData.append('file', file)
+    const headers: Record<string, string> = {}
+    if (_accessToken) headers['Authorization'] = `Bearer ${_accessToken}`
+    const res = await fetch('/api/snmp/collectors/import-csv', { method: 'POST', headers, body: formData })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }))
+      throw new Error(err.detail || res.statusText)
+    }
+    return res.json()
+  },
+
+  exportOids: async (): Promise<void> => {
+    const headers: Record<string, string> = {}
+    if (_accessToken) headers['Authorization'] = `Bearer ${_accessToken}`
+    const res = await fetch('/api/snmp/oids/export', { headers })
+    if (!res.ok) throw new Error(`Export failed: ${res.status}`)
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'pktsnmp-oids.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+  },
+
+  importOids: async (file: File): Promise<{ created: number; skipped: number; errors: string[] }> => {
+    const formData = new FormData()
+    formData.append('file', file)
+    const headers: Record<string, string> = {}
+    if (_accessToken) headers['Authorization'] = `Bearer ${_accessToken}`
+    const res = await fetch('/api/snmp/oids/import-csv', { method: 'POST', headers, body: formData })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }))
+      throw new Error(err.detail || res.statusText)
+    }
+    return res.json()
+  },
+
   // ── Metrics ───────────────────────────────────────────────────────────────
   getDeviceMetricsLatest: (deviceId: number) =>
     request<MetricLatestItem[]>(`/snmp/devices/${deviceId}/metrics/latest`),
@@ -514,6 +571,7 @@ export type LogQueryParams = {
   logger?: string
   search?: string
   since?: string
+  until?: string
   limit?: string
   offset?: string
 }
@@ -626,6 +684,10 @@ export const OID_META: Record<string, { label: string; unit: string; isCounter: 
   panSessionActiveTcp:   { label: 'Active TCP',         unit: '',   isCounter: false, isStatus: false },
   panSessionActiveUdp:   { label: 'Active UDP',         unit: '',   isCounter: false, isStatus: false },
   panSessionActiveICMP:  { label: 'Active ICMP',        unit: '',   isCounter: false, isStatus: false },
+  // Generic HOST-RESOURCES-MIB system scalars/tables
+  hrProcessorLoad:       { label: 'CPU Load (%)',       unit: '%',  isCounter: false, isStatus: false },
+  hrMemorySize:          { label: 'Memory (KB)',        unit: 'KB', isCounter: false, isStatus: false },
+  hrStorageUsed:         { label: 'Storage Used (blocks)', unit: '', isCounter: false, isStatus: false },
 }
 
 // ── Alert rule types for SNMP ─────────────────────────────────────────────────
