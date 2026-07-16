@@ -1,5 +1,5 @@
 import { Component, useEffect, useRef, useState } from 'react'
-import { api, getToken, User, UserIn, SslStatus, HierarchyOrg, HierarchyGroup, HierarchySite } from '../api/client'
+import { api, getToken, User, UserIn, SslStatus, HierarchyOrg, HierarchyGroup, HierarchySite, HierarchyLocation } from '../api/client'
 import { useAutoRefresh } from '../store/autoRefresh'
 import { useAuth } from '../store/auth'
 
@@ -1949,13 +1949,16 @@ function HierarchyTab() {
   const [newOrg, setNewOrg]           = useState('')
   const [newGroup, setNewGroup]       = useState<Record<number, string>>({})   // orgId → name
   const [newSite, setNewSite]         = useState<Record<number, string>>({})   // groupId → name
+  const [newLocation, setNewLocation] = useState<Record<number, string>>({})   // siteId → name
   const [addingOrg, setAddingOrg]     = useState(false)
   const [addingGroup, setAddingGroup] = useState<Record<number, boolean>>({})
   const [addingSite, setAddingSite]   = useState<Record<number, boolean>>({})
+  const [addingLocation, setAddingLocation] = useState<Record<number, boolean>>({})
 
   // Expand/collapse
   const [expandedOrgs, setExpandedOrgs]     = useState<Set<number>>(new Set())
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set())
+  const [expandedSites, setExpandedSites]   = useState<Set<number>>(new Set())
 
   const load = async () => {
     setLoading(true)
@@ -1967,6 +1970,7 @@ function HierarchyTab() {
 
   const toggleOrg   = (id: number) => setExpandedOrgs(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   const toggleGroup = (id: number) => setExpandedGroups(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleSite  = (id: number) => setExpandedSites(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
 
   const addOrg = async () => {
     const name = newOrg.trim()
@@ -1984,7 +1988,7 @@ function HierarchyTab() {
   }
 
   const deleteOrg = async (id: number, name: string) => {
-    if (!window.confirm(`Delete org "${name}" and all its groups and sites?`)) return
+    if (!window.confirm(`Delete org "${name}" and all its groups, sites, and locations?`)) return
     try { await api.deleteHierarchyOrg(id); setOrgs(await api.getHierarchy()) }
     catch (e: any) { setError(e.message || 'Failed') }
   }
@@ -2005,7 +2009,7 @@ function HierarchyTab() {
   }
 
   const deleteGroup = async (id: number, name: string) => {
-    if (!window.confirm(`Delete group "${name}" and all its sites?`)) return
+    if (!window.confirm(`Delete group "${name}" and all its sites and locations?`)) return
     try { await api.deleteHierarchyGroup(id); setOrgs(await api.getHierarchy()) }
     catch (e: any) { setError(e.message || 'Failed') }
   }
@@ -2015,16 +2019,37 @@ function HierarchyTab() {
     if (!name) return
     setAddingSite(s => ({ ...s, [groupId]: true }))
     try {
-      await api.createHierarchySite(name, groupId)
+      const site = await api.createHierarchySite(name, groupId)
       setNewSite(s => ({ ...s, [groupId]: '' }))
       setOrgs(await api.getHierarchy())
+      setExpandedGroups(s => new Set([...s, groupId]))
+      setExpandedSites(s => new Set([...s, site.id]))
     } catch (e: any) { setError(e.message || 'Failed') }
     finally { setAddingSite(s => ({ ...s, [groupId]: false })) }
   }
 
   const deleteSite = async (id: number, name: string) => {
-    if (!window.confirm(`Delete site "${name}"?`)) return
+    if (!window.confirm(`Delete site "${name}" and all its locations?`)) return
     try { await api.deleteHierarchySite(id); setOrgs(await api.getHierarchy()) }
+    catch (e: any) { setError(e.message || 'Failed') }
+  }
+
+  const addLocation = async (siteId: number) => {
+    const name = (newLocation[siteId] ?? '').trim()
+    if (!name) return
+    setAddingLocation(s => ({ ...s, [siteId]: true }))
+    try {
+      await api.createHierarchyLocation(name, siteId)
+      setNewLocation(s => ({ ...s, [siteId]: '' }))
+      setOrgs(await api.getHierarchy())
+      setExpandedSites(s => new Set([...s, siteId]))
+    } catch (e: any) { setError(e.message || 'Failed') }
+    finally { setAddingLocation(s => ({ ...s, [siteId]: false })) }
+  }
+
+  const deleteLocation = async (id: number, name: string) => {
+    if (!window.confirm(`Delete location "${name}"?`)) return
+    try { await api.deleteHierarchyLocation(id); setOrgs(await api.getHierarchy()) }
     catch (e: any) { setError(e.message || 'Failed') }
   }
 
@@ -2041,11 +2066,11 @@ function HierarchyTab() {
 
       {/* Description card */}
       <div className="bg-gray-900 border border-gray-800 rounded-xl px-6 py-4">
-        <h2 className="text-sm font-semibold text-white mb-1">Org / Group / Site Hierarchy</h2>
+        <h2 className="text-sm font-semibold text-white mb-1">Org / Group / Site / Location Hierarchy</h2>
         <p className="text-xs text-gray-400">
           Define the organization tree that appears as dropdowns in device configuration.
-          Structure: <span className="text-white font-medium">Org → Group → Site</span>.
-          Deleting an entry cascades — removing an Org deletes all its Groups and Sites.
+          Structure: <span className="text-white font-medium">Org → Group → Site → Location</span>.
+          Deleting an entry cascades — removing an Org deletes all its Groups, Sites, and Locations.
         </p>
       </div>
 
@@ -2169,20 +2194,72 @@ function HierarchyTab() {
                               {grp.sites.length === 0 ? (
                                 <p className="text-xs text-gray-600 pl-5">No sites yet.</p>
                               ) : (
-                                <div className="space-y-1 pl-5">
+                                <div className="space-y-2 pl-5">
                                   {grp.sites.map((site: HierarchySite) => (
-                                    <div key={site.id} className="flex items-center gap-2 py-1">
-                                      <svg className="w-3 h-3 text-amber-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
-                                      </svg>
-                                      <span className="text-xs text-gray-300 flex-1">{site.name}</span>
-                                      <button
-                                        onClick={() => deleteSite(site.id, site.name)}
-                                        className="text-xs text-red-500 hover:text-red-400 px-1.5 py-0.5 rounded transition-colors"
-                                        title="Delete site"
-                                      >
-                                        ✕
-                                      </button>
+                                    <div key={site.id} className="bg-gray-800/40 border border-gray-700/40 rounded-lg overflow-hidden">
+                                      {/* Site row */}
+                                      <div className="flex items-center gap-2 px-2.5 py-1.5 border-b border-gray-700/40">
+                                        <button onClick={() => toggleSite(site.id)} className="text-gray-600 hover:text-white transition-colors w-3 flex-shrink-0 text-xs">
+                                          {expandedSites.has(site.id) ? '▼' : '▶'}
+                                        </button>
+                                        <svg className="w-3 h-3 text-amber-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                          <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
+                                        </svg>
+                                        <span className="text-xs text-gray-300 flex-1">{site.name}</span>
+                                        <span className="text-xs text-gray-600">{site.locations.length} location{site.locations.length !== 1 ? 's' : ''}</span>
+                                        <button
+                                          onClick={() => deleteSite(site.id, site.name)}
+                                          className="text-xs text-red-500 hover:text-red-400 px-1.5 py-0.5 rounded transition-colors"
+                                          title="Delete site"
+                                        >
+                                          ✕
+                                        </button>
+                                      </div>
+
+                                      {expandedSites.has(site.id) && (
+                                        <div className="px-2.5 py-2 space-y-1.5">
+                                          {/* Add location row */}
+                                          <div className="flex items-center gap-2 pl-4">
+                                            <input
+                                              value={newLocation[site.id] ?? ''}
+                                              onChange={e => setNewLocation(s => ({ ...s, [site.id]: e.target.value }))}
+                                              onKeyDown={e => e.key === 'Enter' && addLocation(site.id)}
+                                              placeholder="New location name…"
+                                              className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1 text-xs text-white placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                            />
+                                            <button
+                                              onClick={() => addLocation(site.id)}
+                                              disabled={addingLocation[site.id] || !(newLocation[site.id] ?? '').trim()}
+                                              className="px-2.5 py-1 text-xs bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-white rounded-lg transition-colors whitespace-nowrap"
+                                            >
+                                              {addingLocation[site.id] ? 'Adding…' : '+ Location'}
+                                            </button>
+                                          </div>
+
+                                          {/* Location list */}
+                                          {site.locations.length === 0 ? (
+                                            <p className="text-xs text-gray-600 pl-4">No locations yet.</p>
+                                          ) : (
+                                            <div className="space-y-1 pl-4">
+                                              {site.locations.map((loc: HierarchyLocation) => (
+                                                <div key={loc.id} className="flex items-center gap-2 py-1">
+                                                  <svg className="w-3 h-3 text-purple-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                                    <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
+                                                  </svg>
+                                                  <span className="text-xs text-gray-300 flex-1">{loc.name}</span>
+                                                  <button
+                                                    onClick={() => deleteLocation(loc.id, loc.name)}
+                                                    className="text-xs text-red-500 hover:text-red-400 px-1.5 py-0.5 rounded transition-colors"
+                                                    title="Delete location"
+                                                  >
+                                                    ✕
+                                                  </button>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
+                                      )}
                                     </div>
                                   ))}
                                 </div>

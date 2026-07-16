@@ -118,13 +118,14 @@ class LocalCollector:
         }
 
     async def _handle_trap(self, raw_trap: dict) -> None:
+        # Alert rules (including trap_received) are evaluated independently by
+        # AlertEngine's own periodic sweep (app/alerts/engine.py) reading stored
+        # data on its own schedule — there's no live event hook to call into here.
         try:
             trap = parse_trap_payload(raw_trap)
             storage = get_storage()
             await storage.ingest_trap(trap)
             log.debug(f"Trap from {trap['source_ip']} stored")
-            if self._alert_engine:
-                await self._alert_engine.process_trap(trap)
         except Exception as e:
             log.error(f"Trap handler error: {e}")
 
@@ -132,14 +133,11 @@ class LocalCollector:
         try:
             storage = get_storage()
             await storage.ingest_poll_result(result)
-            if self._alert_engine:
-                await self._alert_engine.process_poll_result(result)
         except Exception as e:
             log.error(f"Poll result handler error: {e}")
 
     async def _handle_poll_failure(self, device_id: int, device_ip: str) -> None:
-        if self._alert_engine:
-            try:
-                await self._alert_engine.process_poll_failure(device_id, device_ip)
-            except Exception as e:
-                log.debug(f"Poll failure alert error: {e}")
+        # device_down/device_unreachable alerting reads devices.status/last_seen
+        # directly in AlertEngine's periodic sweep — poll_engine.py's own
+        # _update_device_status() call already keeps those columns current.
+        pass
