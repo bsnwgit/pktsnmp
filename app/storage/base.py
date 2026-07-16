@@ -111,6 +111,10 @@ class StorageBase(ABC):
         """Most recent polled_at for a device."""
         raise NotImplementedError
 
+    async def get_collector_last_poll(self, collector_id: int) -> str | None:
+        """Most recent polled_at for any device polled by a collector."""
+        raise NotImplementedError
+
     async def run_cleanup(self, retention_days: int) -> dict:
         """Delete rows older than retention_days. Returns {deleted_traps, deleted_poll_results}."""
         raise NotImplementedError

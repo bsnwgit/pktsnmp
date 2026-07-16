@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { getToken } from '../api/client'
+import { useEffect, useRef, useState } from 'react'
+import { api, getToken } from '../api/client'
 
 interface OidEntry {
   id: number; oid: string; name: string; description: string
@@ -97,6 +97,9 @@ export default function OidCatalog() {
   const [confirm, setConfirm] = useState<OidEntry | null>(null)
   const [error, setError]     = useState('')
   const [filter, setFilter]   = useState('')
+  const [exporting, setExporting]     = useState(false)
+  const [importResult, setImportResult] = useState<{ created: number; skipped: number; errors: string[] } | null>(null)
+  const importFileRef                 = useRef<HTMLInputElement>(null)
 
   const authHeader = () => ({ Authorization: `Bearer ${getToken() ?? ''}`, 'Content-Type': 'application/json' })
 
@@ -116,6 +119,38 @@ export default function OidCatalog() {
       const res = await fetch(`/api/snmp/oids/${o.id}`, { method: 'DELETE', headers: authHeader() })
       if (!res.ok) { const d = await res.json(); throw new Error(d.detail || 'Failed') }
       setConfirm(null); await load()
+    } catch (e: any) { setError(e.message) }
+  }
+
+  const handleDownloadTemplate = () => {
+    const rows = [
+      ['oid', 'name', 'description', 'unit', 'data_type'],
+      ['1.3.6.1.4.1.9.9.13.1.3.1.6.1', 'ciscoEnvMonTemperatureThreshold', 'Cisco temp sensor threshold', 'C', 'gauge'],
+      ['1.3.6.1.4.1.2021.10.1.3.1', 'laLoadInt', 'UCD-SNMP 1-min load average (int)', '', 'gauge'],
+    ]
+    const csv = rows.map(r => r.map(v => `"${v}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = 'pktsnmp-oids-template.csv'; a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleExport = async () => {
+    setExporting(true)
+    try { await api.exportOids() }
+    catch (e: any) { setError(e.message) }
+    finally { setExporting(false) }
+  }
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    try {
+      const result = await api.importOids(file)
+      setImportResult(result)
+      if (result.created > 0) await load()
     } catch (e: any) { setError(e.message) }
   }
 
@@ -141,10 +176,28 @@ export default function OidCatalog() {
           <h1 className="text-lg font-semibold text-white">OID Catalog</h1>
           <p className="text-xs text-gray-500 mt-0.5">OIDs polled from devices. Bundled entries are read-only; add custom OIDs for your environment.</p>
         </div>
-        <button onClick={() => setModal('new')}
-          className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">
-          + Add OID
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={handleExport} disabled={exporting}
+            className="px-3 py-2 text-sm bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors disabled:opacity-50">
+            {exporting ? 'Exporting…' : '↓ Export CSV'}
+          </button>
+          <div className="flex items-center gap-1">
+            <button onClick={() => importFileRef.current?.click()}
+              className="px-3 py-2 text-sm bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors rounded-r-none border-r border-gray-600">
+              ↑ Import CSV
+            </button>
+            <button onClick={handleDownloadTemplate} title="Download CSV template"
+              className="px-2 py-2 text-sm bg-gray-700 hover:bg-gray-600 text-gray-400 hover:text-white rounded-lg transition-colors rounded-l-none"
+              aria-label="Download template">
+              template
+            </button>
+          </div>
+          <input ref={importFileRef} type="file" accept=".csv" className="hidden" onChange={handleImportFile} />
+          <button onClick={() => setModal('new')}
+            className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors">
+            + Add OID
+          </button>
+        </div>
       </div>
 
       <div className="flex items-center gap-2">
@@ -227,6 +280,42 @@ export default function OidCatalog() {
             <div className="flex justify-end gap-3">
               <button onClick={() => setConfirm(null)} className="px-4 py-2 text-sm text-gray-400 hover:text-white">Cancel</button>
               <button onClick={() => deleteOid(confirm)} className="px-4 py-2 text-sm bg-red-600 hover:bg-red-500 text-white rounded-lg">Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {importResult && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 py-8 px-4" onClick={() => setImportResult(null)}>
+          <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 max-w-lg w-full" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold text-white mb-3">Import complete</h3>
+            <div className="space-y-1 mb-4">
+              <p className="text-sm text-green-400">✓ {importResult.created} OID{importResult.created !== 1 ? 's' : ''} created</p>
+              {importResult.skipped > 0 && (
+                <p className="text-sm text-yellow-400">⚠ {importResult.skipped} row{importResult.skipped !== 1 ? 's' : ''} skipped</p>
+              )}
+            </div>
+            {importResult.errors.length > 0 && (
+              <div className="bg-gray-800 rounded-lg px-3 py-2 max-h-36 overflow-y-auto mb-4">
+                {importResult.errors.map((e, i) => (
+                  <p key={i} className="text-xs text-red-400 font-mono">{e}</p>
+                ))}
+              </div>
+            )}
+            <div className="bg-gray-800/60 rounded-lg px-3 py-2 mb-4">
+              <p className="text-xs font-medium text-gray-400 mb-1">CSV columns (header row required)</p>
+              <p className="text-xs font-mono text-gray-500 break-all">oid, name, description, unit, data_type</p>
+              <p className="text-xs text-gray-600 mt-1">
+                data_type: gauge · counter · string · timeticks · ipaddress (defaults to gauge)
+              </p>
+            </div>
+            <div className="flex items-center justify-between">
+              <button onClick={handleDownloadTemplate} className="text-xs text-blue-400 hover:text-blue-300 transition-colors">
+                ↓ Download template
+              </button>
+              <button onClick={() => setImportResult(null)} className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg">
+                Done
+              </button>
             </div>
           </div>
         </div>
