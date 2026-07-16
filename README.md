@@ -109,6 +109,10 @@ sudo ufw allow 162/udp   # only if using the built-in SNMP trap receiver
 | SNMP | pysnmp-lextudio (v1/v2c/v3 traps and polling) |
 | Service | systemd `pktsnmp.service` |
 
+### Metrics pages
+
+Per-device Metrics pages show Traffic / Packets / Errors & Discards / IP-Protocol charts, split by interface. **System Resources (CPU load, Memory, Storage)** is device-wide, not per-interface, so it lives on its own page instead of repeating on every interface's chart view — reached via a link in the device sidebar box, above the interface list, each metric on its own chart with its own Y-axis scale. Every "no data" empty state explains why, dynamically: it checks whether that specific device has ever reported the metric (not a hardcoded per-device-type guess), so the message disappears on its own once real data starts flowing. The local poll engine polls every catalog OID each cycle (no longer capped at the first 20 by insertion order) and properly closes its per-device SNMP engine after each poll to avoid leaking file descriptors over long uptimes.
+
 ---
 
 ## Requirements
@@ -249,6 +253,8 @@ Runs in-process on the pktSNMP host. Polls all devices assigned to `collector_id
 Existing OpenTelemetry Collector instances push OTLP HTTP JSON to pktSNMP.
 
 Multiple otelcol instances can be registered, each with a unique bearer token — generated and rotated in **Settings → Collectors**. See `docs/collector-setup.md` for the full redirect/registration walkthrough.
+
+**Bulk import/export:** the Collectors and OID Catalog pages both have "Export CSV" / "Import CSV" / template-download buttons, for provisioning many collectors or a large OID set (a vendor MIB dump, a shared team catalog) at once instead of one at a time. Collector CSV import never accepts API tokens by value — each imported row gets its own freshly generated token, shown once in the import-result dialog, same as adding a single collector. Duplicate rows (by collector name / OID string) are skipped with a per-row message, not overwritten.
 
 **Minimal otelcol exporter block:**
 
@@ -447,7 +453,7 @@ The alert engine runs as a background task, evaluating all enabled rules every 6
 | `collector_gap` | warning | No ingest data received from a collector within window |
 | `trap_received` | info | Any SNMP trap received from a device |
 
-Custom rules are added via **Alerts → Rules** in the UI. Each rule specifies type, device scope, threshold values, severity, cooldown, and notification channels.
+Custom rules are added via **Alerts → Rules** in the UI. Each rule specifies type, device scope, threshold values, severity, cooldown, and notification channels. Rules also support Export CSV / Import CSV / template-download for bulk provisioning; `conditions` round-trips as a JSON object string in one column (shape depends on `rule_type`) and `channels` as a comma-separated column.
 
 ### Behavior
 
@@ -467,6 +473,10 @@ Custom rules are added via **Alerts → Rules** in the UI. Each rule specifies t
 - **Device tree dots** — red pulsing dot on the device and its parent Org/Group/Site/Location nodes
 
 Supported notification channels: `inapp`, `email`, `slack`, `pagerduty`, `webhook`.
+
+### Filtering & history
+
+**Alerts → Active** and **Alerts → History**, and the **Application Logs** page, all share the same search + time-range filter bar: a text search, a severity/level filter, and a time-range dropdown (1h/6h/24h/7d/30d/All time, plus **Custom range…**). Custom range shows two date/time pickers, defaulting to today's 12:00 AM–11:59 PM; it validates that the end is after the start (including same-day-earlier-end-time) and clamps both sides so neither can be set in the future — an invalid combination shows an inline error instead of silently applying. All timestamps rendered anywhere in the app (alert events, device last-seen, users' last login, chart axes) are explicitly normalized to UTC before parsing, so they display correctly regardless of the browser's local timezone. All 12 built-in rule types are deletable — none are permanently protected by id.
 
 ---
 

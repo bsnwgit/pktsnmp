@@ -18,7 +18,7 @@ import {
 } from 'recharts'
 import {
   api,
-  DeviceMetricsCard, DeviceInterface, MetricsHistoryResponse, MetricPoint,
+  DeviceMetricsCard, DeviceInterface, MetricsHistoryResponse, MetricPoint, MetricSnapshot,
   OID_META, TimeRange,
 } from '../api/client'
 
@@ -78,10 +78,24 @@ const OID_GROUPS = {
     unit:  '/s',
     isRate: true,
   },
-  system: {
-    label: 'System Resources',
-    oids:  ['hrProcessorLoad', 'hrMemorySize', 'hrStorageUsed'] as const,
-    color: ['#10b981', '#6366f1', '#f43f5e'],
+  cpu: {
+    label: 'CPU Load',
+    oids:  ['hrProcessorLoad'] as const,
+    color: ['#10b981'],
+    unit:  '%',
+    isRate: false,
+  },
+  memory: {
+    label: 'Memory',
+    oids:  ['hrMemorySize'] as const,
+    color: ['#6366f1'],
+    unit:  'KB',
+    isRate: false,
+  },
+  storage: {
+    label: 'Storage',
+    oids:  ['hrStorageUsed'] as const,
+    color: ['#f43f5e'],
     unit:  '',
     isRate: false,
   },
@@ -177,7 +191,7 @@ function computeRates(
       const prev = rows[i - 1]
       const row = rows[i]
       if (prev.max_value === null || row.max_value === null) continue
-      const dt = (new Date(row.bucket_ts).getTime() - new Date(prev.bucket_ts).getTime()) / 1000
+      const dt = (new Date(toUtc(row.bucket_ts)).getTime() - new Date(toUtc(prev.bucket_ts)).getTime()) / 1000
       if (dt <= 0) continue
       const delta = row.max_value - prev.max_value
       if (delta < 0) continue // counter reset
@@ -197,9 +211,19 @@ function computeRates(
 // cycles (which are ~60s apart) — this only matters for the raw/unbucketed
 // (bucket_seconds=0, ≤1h) view; server-bucketed views already floor every
 // OID's timestamp to the same window so this is a no-op there.
+// Several backend timestamps come back as naive UTC (no 'Z'/offset) — e.g.
+// bucketed bucket_ts via SQLite's datetime(epoch, 'unixepoch'), or alert_events'
+// fired_at via datetime('now') — while others already carry an offset. Without
+// forcing UTC interpretation on the naive ones, the browser parses them as
+// local time and every downstream display/position is shifted by the local
+// UTC offset. Safe to call on already-offset-bearing strings too (no-op).
+function toUtc(ts: string): string {
+  return ts.includes('T') || ts.endsWith('Z') ? ts : ts.replace(' ', 'T') + 'Z'
+}
+
 const TS_ALIGN_MS = 2000
 function alignTs(ts: string): number {
-  const ms = new Date(ts).getTime()
+  const ms = new Date(toUtc(ts)).getTime()
   return Math.round(ms / TS_ALIGN_MS) * TS_ALIGN_MS
 }
 
@@ -215,9 +239,19 @@ function buildTimeline(
       const rates = computeRates(series, oid)
       byOid[oid] = new Map(rates.map(r => [alignTs(r.bucket_ts), r.rate]))
     } else {
-      byOid[oid] = new Map(
-        series.filter(r => r.oid_label === oid).map(r => [alignTs(r.bucket_ts), r.avg_value])
-      )
+      // Some scalar-looking OIDs (e.g. hrProcessorLoad) are actually indexed
+      // per-instance (per-core, per-volume) with a distinct interface_label —
+      // multiple rows can share one timestamp. Average them per bucket instead
+      // of letting a plain Map silently keep only the last row's value.
+      const sums = new Map<number, { total: number; count: number }>()
+      for (const r of series) {
+        if (r.oid_label !== oid || r.avg_value === null) continue
+        const ts = alignTs(r.bucket_ts)
+        const cur = sums.get(ts)
+        if (cur) { cur.total += r.avg_value; cur.count += 1 }
+        else sums.set(ts, { total: r.avg_value, count: 1 })
+      }
+      byOid[oid] = new Map([...sums].map(([ts, s]) => [ts, s.total / s.count]))
     }
   }
   const relevant = series.filter(r => oids.includes(r.oid_label))
@@ -244,13 +278,36 @@ interface ChartSectionProps {
   colors: readonly string[]
   unit: string
   alertEvents?: MetricsHistoryResponse['alert_events']
+  noDataHint?: string
 }
 
 function groupHasData(data: Record<string, number | null>[], oids: readonly string[]): boolean {
   return data.length > 0 && data.some(r => oids.some(o => r[o] !== null))
 }
 
-function ChartSection({ title, data, oids, colors, unit, alertEvents = [] }: ChartSectionProps) {
+/**
+ * Best-effort explanation for why a metric section has no data, shown under the
+ * empty state. Driven entirely by this specific device's own polling history
+ * (via `latest`, an unscoped "most recent value ever" snapshot per oid_label) —
+ * never by a static device-type assumption, so the message disappears on its
+ * own the moment a device actually reports the metric, regardless of type.
+ */
+function getNoDataHint(
+  oids: readonly string[],
+  isRate: boolean,
+  latest: Record<string, MetricSnapshot>,
+): string {
+  const everReported = oids.some(o => latest[o] != null)
+  if (everReported) {
+    return isRate
+      ? `This device has reported this metric before, but not within the selected time range — try a wider range, or check back after the next poll cycle.`
+      : `This device has reported this metric before, but not within the selected time range — try a wider time range.`
+  }
+  const labels = oids.map(o => OID_META[o]?.label ?? o).join(' / ')
+  return `This device has never reported a value for ${labels} — it may not support this metric, or hasn't completed a poll cycle yet.`
+}
+
+function ChartSection({ title, data, oids, colors, unit, alertEvents = [], noDataHint }: ChartSectionProps) {
   const hasData = groupHasData(data, oids)
   return (
     <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">
@@ -314,7 +371,7 @@ function ChartSection({ title, data, oids, colors, unit, alertEvents = [] }: Cha
             {alertEvents.map(ae => (
               <ReferenceLine
                 key={ae.id}
-                x={new Date(ae.fired_at).getTime()}
+                x={alignTs(ae.fired_at)}
                 stroke={ae.severity === 'critical' ? '#ef4444' : ae.severity === 'warning' ? '#f59e0b' : '#3b82f6'}
                 strokeDasharray="4 2"
               />
@@ -322,8 +379,9 @@ function ChartSection({ title, data, oids, colors, unit, alertEvents = [] }: Cha
           </AreaChart>
         </ResponsiveContainer>
       ) : (
-        <div className="h-40 flex items-center justify-center text-sm text-gray-600 border border-dashed border-gray-800 rounded-lg">
-          No data in this time range
+        <div className="h-40 flex flex-col items-center justify-center gap-1.5 text-center px-6 border border-dashed border-gray-800 rounded-lg">
+          <p className="text-sm text-gray-500">No data in this time range</p>
+          {noDataHint && <p className="text-xs text-gray-600 max-w-md">{noDataHint}</p>}
         </div>
       )}
     </div>
@@ -342,7 +400,7 @@ function DeviceCard({ card, onClick }: { card: DeviceMetricsCard; onClick: () =>
   const uptime    = latest['sysUpTime']?.value_numeric
   const cpu       = latest['hrProcessorLoad']?.value_numeric
   const lastSeen  = device.last_seen
-    ? new Date(device.last_seen).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })
+    ? new Date(toUtc(device.last_seen)).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })
     : null
 
   return (
@@ -675,7 +733,9 @@ export default function MetricsPage() {
     traffic:    buildTimeline(series, OID_GROUPS.traffic.oids,    true),
     packets:    buildTimeline(series, OID_GROUPS.packets.oids,    true),
     errors:     buildTimeline(series, OID_GROUPS.errors.oids,     true),
-    system:     buildTimeline(series, OID_GROUPS.system.oids,     false),
+    cpu:        buildTimeline(series, OID_GROUPS.cpu.oids,        false),
+    memory:     buildTimeline(series, OID_GROUPS.memory.oids,     false),
+    storage:    buildTimeline(series, OID_GROUPS.storage.oids,    false),
     ip:         buildTimeline(series, OID_GROUPS.ip.oids,         true),
     panTraffic: buildTimeline(series, OID_GROUPS.panTraffic.oids, true),
     panPackets: buildTimeline(series, OID_GROUPS.panPackets.oids, true),
@@ -837,14 +897,6 @@ export default function MetricsPage() {
                 <StatusDot status={selectedCard.device.status} />
                 <span className="text-xs text-gray-500 capitalize">{selectedCard.device.status}</span>
               </div>
-              {hiddenIfaces.size > 0 && (
-                <button
-                  onClick={resetHiddenInterfaces}
-                  className="mt-2 text-xs text-blue-400 hover:text-blue-300 transition-colors"
-                >
-                  Reset {hiddenIfaces.size} hidden interface{hiddenIfaces.size !== 1 ? 's' : ''}
-                </button>
-              )}
               <button
                 onClick={goSystem}
                 className={[
@@ -882,6 +934,14 @@ export default function MetricsPage() {
                   onHide={hideInterface}
                 />
               ))}
+              {hiddenIfaces.size > 0 && (
+                <button
+                  onClick={resetHiddenInterfaces}
+                  className="w-full text-left px-3 py-2 mt-1 text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                >
+                  Reset {hiddenIfaces.size} hidden interface{hiddenIfaces.size !== 1 ? 's' : ''}
+                </button>
+              )}
             </div>
           </aside>
 
@@ -981,14 +1041,35 @@ export default function MetricsPage() {
 
             {/* Metric sections — always rendered, show empty state if no data */}
             {viewMode === 'system' ? (
-              <ChartSection
-                title="System Resources (CPU %, Memory, Storage)"
-                data={chartData.system}
-                oids={OID_GROUPS.system.oids}
-                colors={OID_GROUPS.system.color}
-                unit=""
-                alertEvents={history?.alert_events}
-              />
+              <>
+                <ChartSection
+                  title="CPU Load (%)"
+                  data={chartData.cpu}
+                  oids={OID_GROUPS.cpu.oids}
+                  colors={OID_GROUPS.cpu.color}
+                  unit="%"
+                  alertEvents={history?.alert_events}
+                  noDataHint={getNoDataHint(OID_GROUPS.cpu.oids, false, selectedCard.latest)}
+                />
+                <ChartSection
+                  title="Memory (KB)"
+                  data={chartData.memory}
+                  oids={OID_GROUPS.memory.oids}
+                  colors={OID_GROUPS.memory.color}
+                  unit="KB"
+                  alertEvents={history?.alert_events}
+                  noDataHint={getNoDataHint(OID_GROUPS.memory.oids, false, selectedCard.latest)}
+                />
+                <ChartSection
+                  title="Storage Used (blocks)"
+                  data={chartData.storage}
+                  oids={OID_GROUPS.storage.oids}
+                  colors={OID_GROUPS.storage.color}
+                  unit=""
+                  alertEvents={history?.alert_events}
+                  noDataHint={getNoDataHint(OID_GROUPS.storage.oids, false, selectedCard.latest)}
+                />
+              </>
             ) : (
               <>
                 <ChartSection
@@ -998,6 +1079,7 @@ export default function MetricsPage() {
                   colors={OID_GROUPS.traffic.color}
                   unit="bps"
                   alertEvents={history?.alert_events}
+                  noDataHint={getNoDataHint(OID_GROUPS.traffic.oids, true, selectedCard.latest)}
                 />
                 <ChartSection
                   title="Packets (per sec)"
@@ -1006,6 +1088,7 @@ export default function MetricsPage() {
                   colors={OID_GROUPS.packets.color}
                   unit="pkt/s"
                   alertEvents={history?.alert_events}
+                  noDataHint={getNoDataHint(OID_GROUPS.packets.oids, true, selectedCard.latest)}
                 />
                 <ChartSection
                   title="Errors & Discards (per sec)"
@@ -1014,6 +1097,7 @@ export default function MetricsPage() {
                   colors={OID_GROUPS.errors.color}
                   unit="/s"
                   alertEvents={history?.alert_events}
+                  noDataHint={getNoDataHint(OID_GROUPS.errors.oids, true, selectedCard.latest)}
                 />
                 <ChartSection
                   title="IP / Protocol (receives, requests, TCP sessions, UDP)"
@@ -1022,6 +1106,7 @@ export default function MetricsPage() {
                   colors={OID_GROUPS.ip.color}
                   unit="/s"
                   alertEvents={history?.alert_events}
+                  noDataHint={getNoDataHint(OID_GROUPS.ip.oids, true, selectedCard.latest)}
                 />
                 {groupHasData(chartData.panTraffic, OID_GROUPS.panTraffic.oids) && (
                   <ChartSection
@@ -1066,7 +1151,7 @@ export default function MetricsPage() {
                       <span className={`flex-shrink-0 font-medium mt-0.5 ${ae.severity === 'critical' ? 'text-red-400' : ae.severity === 'warning' ? 'text-yellow-400' : 'text-blue-400'}`}>
                         {ae.severity.toUpperCase()}
                       </span>
-                      <span className="text-gray-400 font-mono flex-shrink-0">{new Date(ae.fired_at).toLocaleString()}</span>
+                      <span className="text-gray-400 font-mono flex-shrink-0">{new Date(toUtc(ae.fired_at)).toLocaleString()}</span>
                       <span className="text-gray-300">{ae.rule_name} — {ae.message}</span>
                       {ae.resolved_at && <span className="text-green-600 ml-auto flex-shrink-0">resolved</span>}
                     </div>
@@ -1083,7 +1168,7 @@ export default function MetricsPage() {
                   {history!.trap_events.map(te => (
                     <div key={te.id} className="flex items-center gap-3 text-xs">
                       <span className="text-yellow-500">⚡</span>
-                      <span className="text-gray-400 font-mono flex-shrink-0">{new Date(te.received_at).toLocaleString()}</span>
+                      <span className="text-gray-400 font-mono flex-shrink-0">{new Date(toUtc(te.received_at)).toLocaleString()}</span>
                       <span className="text-gray-300 font-mono">{te.trap_oid ?? 'unknown OID'}</span>
                       {te.source_ip && <span className="text-gray-600">{te.source_ip}</span>}
                     </div>
