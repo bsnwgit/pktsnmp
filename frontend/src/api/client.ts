@@ -292,7 +292,7 @@ export const api = {
   ackAlertEvent: (id: number) => request(`/alerts/events/${id}/ack`, { method: 'POST' }),
   ackAllAlertEvents: () => request('/alerts/events/ack-all', { method: 'POST' }),
 
-  // ── Hierarchy (Org / Group / Site pick-list definitions) ──────────────────
+  // ── Hierarchy (Org / Group / Site / Location pick-list definitions) ───────
   getHierarchy: () => request<HierarchyOrg[]>('/snmp/hierarchy'),
   createHierarchyOrg: (name: string) =>
     request<HierarchyOrg>('/snmp/hierarchy/orgs', { method: 'POST', body: JSON.stringify({ name }) }),
@@ -306,6 +306,10 @@ export const api = {
     request<HierarchySite>('/snmp/hierarchy/sites', { method: 'POST', body: JSON.stringify({ name, group_id }) }),
   deleteHierarchySite: (id: number) =>
     request<void>(`/snmp/hierarchy/sites/${id}`, { method: 'DELETE' }),
+  createHierarchyLocation: (name: string, site_id: number) =>
+    request<HierarchyLocation>('/snmp/hierarchy/locations', { method: 'POST', body: JSON.stringify({ name, site_id }) }),
+  deleteHierarchyLocation: (id: number) =>
+    request<void>(`/snmp/hierarchy/locations/${id}`, { method: 'DELETE' }),
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -377,8 +381,8 @@ export interface SnmpTrap {
   community: string
 }
 
-// Environment hierarchy: Org → Group → Site → Device
-// DB columns: org, groups (Group), site (Site)
+// Environment hierarchy: Org → Group → Site → Location → Device
+// DB columns: org, groups (Group), site (Site), location (Location)
 export interface OrgTreeNode {
   type: 'org'
   name: string
@@ -400,6 +404,13 @@ export interface SiteTreeNode {
   subtree_alerts: number
   children: EnvironmentNode[]
 }
+export interface LocationTreeNode {
+  type: 'location'
+  name: string
+  direct_alerts: number
+  subtree_alerts: number
+  children: EnvironmentNode[]
+}
 export interface DeviceTreeNode {
   type: 'device'
   id: number
@@ -408,10 +419,13 @@ export interface DeviceTreeNode {
   org: string
   groups: string          // displayed as "Group"
   site: string            // displayed as "Site"
+  location: string        // displayed as "Location"
   device_type: string     // firewall|switch|wap|wlc|router|iot|ups|server|storage|pdu|camera|load_balancer|vpn|printer|other|''
   status: string          // 'up' | 'down' | 'unknown'
   enabled: boolean
   parent_device_id: number | null
+  parent_id: number | null    // resolved parent (HA-redirected to active peer if applicable); set even when the device isn't nested under it (different location)
+  parent_name: string | null
   ha_role: string | null  // 'active' | 'passive' | 'standalone' | null
   ha_peer_id: number | null
   last_seen: string | null
@@ -419,15 +433,21 @@ export interface DeviceTreeNode {
   subtree_alerts: number
   children: EnvironmentNode[]
 }
-export type EnvironmentNode = OrgTreeNode | GroupTreeNode | SiteTreeNode | DeviceTreeNode
+export type EnvironmentNode = OrgTreeNode | GroupTreeNode | SiteTreeNode | LocationTreeNode | DeviceTreeNode
 
 /** @deprecated use EnvironmentNode / DeviceTreeNode */
 export type SnmpDeviceNode = DeviceTreeNode
 
-// Org / Group / Site hierarchy definition types (pick-list for device form dropdowns)
+// Org / Group / Site / Location hierarchy definition types (pick-list for device form dropdowns)
+export interface HierarchyLocation {
+  id: number
+  name: string
+}
+
 export interface HierarchySite {
   id: number
   name: string
+  locations: HierarchyLocation[]
 }
 
 export interface HierarchyGroup {
