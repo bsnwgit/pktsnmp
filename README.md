@@ -453,7 +453,7 @@ The alert engine runs as a background task, evaluating all enabled rules every 6
 | `collector_gap` | warning | No ingest data received from a collector within window |
 | `trap_received` | info | Any SNMP trap received from a device |
 
-Custom rules are added via **Alerts → Rules** in the UI. Each rule specifies type, device scope, threshold values, severity, cooldown, and notification channels.
+Custom rules are added via **Alerts → Rules** in the UI. Each rule specifies type, device scope, threshold values, severity, cooldown, and notification channels. Rules also support Export CSV / Import CSV / template-download for bulk provisioning; `conditions` round-trips as a JSON object string in one column (shape depends on `rule_type`) and `channels` as a comma-separated column.
 
 ### Behavior
 
