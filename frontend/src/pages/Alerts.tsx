@@ -2,6 +2,153 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { getToken, OID_META } from '../api/client'
 
+// ── Time range ────────────────────────────────────────────────────────────────
+
+const TIME_RANGES = [
+  { value: '1h',     label: '1h' },
+  { value: '6h',     label: '6h' },
+  { value: '24h',    label: '24h' },
+  { value: '7d',     label: '7d' },
+  { value: '30d',    label: '30d' },
+  { value: 'all',    label: 'All time' },
+  { value: 'custom', label: 'Custom range…' },
+] as const
+type TimeRange = typeof TIME_RANGES[number]['value']
+
+const TIME_RANGE_MS: Record<Exclude<TimeRange, 'all' | 'custom'>, number> = {
+  '1h':  60 * 60 * 1000,
+  '6h':  6 * 60 * 60 * 1000,
+  '24h': 24 * 60 * 60 * 1000,
+  '7d':  7 * 24 * 60 * 60 * 1000,
+  '30d': 30 * 24 * 60 * 60 * 1000,
+}
+
+export interface TimeWindow {
+  since?: string
+  until?: string
+}
+
+// datetime-local values are local wall-clock time with no timezone info, so
+// format from local (not UTC) date components — a plain toISOString() would
+// shift the displayed clock time by the browser's UTC offset.
+function toLocalInputValue(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+function todayStart(): string {
+  const d = new Date()
+  d.setHours(0, 0, 0, 0)
+  return toLocalInputValue(d)
+}
+function todayEnd(): string {
+  const d = new Date()
+  d.setHours(23, 59, 0, 0)
+  return toLocalInputValue(d)
+}
+/** Never allow a future moment — clamp back to right now instead. */
+function clampFuture(value: string): string {
+  if (!value) return value
+  const now = new Date()
+  return new Date(value).getTime() > now.getTime() ? toLocalInputValue(now) : value
+}
+
+/**
+ * Preset + custom date/time range picker. Owns its own preset/from/to UI state
+ * and reports the resolved {since, until} ISO bounds up to the parent — as logs
+ * or alert history grow, a preset alone won't always pinpoint the right window.
+ *
+ * Validation: neither side can be in the future (clamped back to now — both via
+ * the inputs' own `max` and as a typed-input backstop), and "to" must be after
+ * "from" (same-day-with-earlier-end-time counts as invalid too, since it's a
+ * plain datetime comparison, not just a date comparison) — an invalid range
+ * shows an inline error and does not get applied, leaving the last valid window.
+ */
+function TimeRangeControl({ onChange }: { onChange: (window: TimeWindow) => void }) {
+  const [preset, setPreset]         = useState<TimeRange>('all')
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo, setCustomTo]     = useState('')
+  const [rangeError, setRangeError] = useState('')
+
+  const emit = (p: TimeRange, from: string, to: string) => {
+    if (p === 'custom') {
+      onChange({
+        since: from ? new Date(from).toISOString() : undefined,
+        until: to ? new Date(to).toISOString() : undefined,
+      })
+    } else if (p === 'all') {
+      onChange({})
+    } else {
+      onChange({ since: new Date(Date.now() - TIME_RANGE_MS[p]).toISOString() })
+    }
+  }
+
+  const applyCustom = (from: string, to: string) => {
+    if (from && to && new Date(to).getTime() < new Date(from).getTime()) {
+      setRangeError('End date/time must be after the start date/time.')
+      return
+    }
+    setRangeError('')
+    emit('custom', from, to)
+  }
+
+  const nowLocal = toLocalInputValue(new Date())
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <select
+        value={preset}
+        onChange={e => {
+          const p = e.target.value as TimeRange
+          setPreset(p)
+          setRangeError('')
+          if (p === 'custom') {
+            // Default to today's full day (12:00 AM – 11:59 PM), clamped to
+            // "now" since the end can't be in the future.
+            const from = customFrom || todayStart()
+            const to   = clampFuture(customTo || todayEnd())
+            setCustomFrom(from)
+            setCustomTo(to)
+            applyCustom(from, to)
+          } else {
+            emit(p, customFrom, customTo)
+          }
+        }}
+        className="bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1 text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+      >
+        {TIME_RANGES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+      </select>
+      {preset === 'custom' && (
+        <>
+          <input
+            type="datetime-local"
+            value={customFrom}
+            max={nowLocal}
+            onChange={e => {
+              const v = clampFuture(e.target.value)
+              setCustomFrom(v)
+              applyCustom(v, customTo)
+            }}
+            className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          <span className="text-xs text-gray-500">to</span>
+          <input
+            type="datetime-local"
+            value={customTo}
+            max={nowLocal}
+            onChange={e => {
+              const v = clampFuture(e.target.value)
+              setCustomTo(v)
+              applyCustom(customFrom, v)
+            }}
+            className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          {rangeError && <span className="text-xs text-red-400">{rangeError}</span>}
+        </>
+      )}
+    </div>
+  )
+}
+
 // ── Interfaces ────────────────────────────────────────────────────────────────
 
 interface AlertEvent {
@@ -29,7 +176,6 @@ interface AlertRule {
   channels: string[]
   cooldown_min: number
   enabled: boolean
-  builtin?: number
   created_at: string
   updated_at: string
 }
@@ -37,7 +183,14 @@ interface AlertRule {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtTime(ts: string): string {
-  return new Date(ts).toLocaleString([], {
+  // fired_at is stored as naive UTC (SQLite's datetime('now'), no 'Z'/offset) —
+  // without forcing UTC interpretation here, the browser parses it as local
+  // time and displays the raw UTC wall-clock numbers mislabeled as local,
+  // which can shift the shown date across midnight relative to the true
+  // local time (e.g. a late-UTC event from "yesterday evening" locally
+  // shows as "today" instead).
+  const utc = ts.includes('T') || ts.endsWith('Z') ? ts : ts.replace(' ', 'T') + 'Z'
+  return new Date(utc).toLocaleString([], {
     month: 'short', day: 'numeric',
     hour: '2-digit', minute: '2-digit', second: '2-digit',
   })
@@ -51,7 +204,10 @@ const SEV_STYLES: Record<string, string> = {
 
 const TOPIC_STYLES: Record<string, string> = {
   Device:    'bg-sky-500/15 text-sky-400 border border-sky-500/30',
+  Interface: 'bg-indigo-500/15 text-indigo-400 border border-indigo-500/30',
+  Metric:    'bg-violet-500/15 text-violet-400 border border-violet-500/30',
   Trap:      'bg-orange-500/15 text-orange-400 border border-orange-500/30',
+  Collector: 'bg-teal-500/15 text-teal-400 border border-teal-500/30',
   Threshold: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30',
 }
 
@@ -883,12 +1039,17 @@ export default function Alerts() {
   const [error, setError]           = useState('')
   const [eventsFilter, setEventsFilter]         = useState('')
   const [eventsSevFilter, setEventsSevFilter]   = useState('')
+  const [eventsWindow, setEventsWindow]         = useState<TimeWindow>({})
   const [historyFilter, setHistoryFilter]       = useState('')
   const [historySevFilter, setHistorySevFilter] = useState('')
+  const [historyWindow, setHistoryWindow]       = useState<TimeWindow>({})
   const [rulesFilter, setRulesFilter]           = useState('')
   const [rulesTopicFilter, setRulesTopicFilter] = useState('')
   const [rulesSortKey, setRulesSortKey]         = useState<keyof AlertRule | 'topic' | null>(null)
   const [rulesSortDir, setRulesSortDir]         = useState<'asc' | 'desc'>('asc')
+  const [rulesExporting, setRulesExporting]     = useState(false)
+  const [rulesImportResult, setRulesImportResult] = useState<{ created: number; skipped: number; errors: string[] } | null>(null)
+  const rulesImportFileRef = useRef<HTMLInputElement>(null)
 
   const authHeaders = useCallback(() => ({
     'Content-Type': 'application/json',
@@ -904,16 +1065,25 @@ export default function Alerts() {
     setLoading(true)
     try {
       const headers = authHeaders()
+      const windowParams = (w: TimeWindow) => {
+        const p = new URLSearchParams()
+        if (w.since) p.set('since', w.since)
+        if (w.until) p.set('until', w.until)
+        const s = p.toString()
+        return s ? `&${s}` : ''
+      }
+      const activeUrl = `/api/alerts/events?acked=false&limit=200${windowParams(eventsWindow)}`
+      const ackedUrl  = `/api/alerts/events?acked=true&limit=200${windowParams(historyWindow)}`
       const [activeRes, ackedRes] = await Promise.all([
-        fetch('/api/alerts/events?acked=false&limit=200', { headers }),
-        fetch('/api/alerts/events?acked=true&limit=200', { headers }),
+        fetch(activeUrl, { headers }),
+        fetch(ackedUrl, { headers }),
       ])
       if (activeRes.ok) setEvents(await activeRes.json())
       if (ackedRes.ok)  setHistory(await ackedRes.json())
     } finally {
       setLoading(false)
     }
-  }, [authHeaders])
+  }, [authHeaders, eventsWindow, historyWindow])
 
   const loadRules = useCallback(async () => {
     const res = await fetch('/api/alerts/rules', { headers: authHeaders() })
@@ -983,6 +1153,52 @@ export default function Alerts() {
     await loadRules()
   }
 
+  const handleDownloadRulesTemplate = () => {
+    const rows = [
+      ['name', 'description', 'rule_type', 'conditions', 'time_window_min', 'severity', 'channels', 'cooldown_min', 'enabled'],
+      ['High CPU — Core-SW-01', 'Fires when CPU exceeds 80%', 'metric_threshold', '{"device_id": 7, "oid": "hrProcessorLoad", "operator": ">", "value": 80}', '5', 'warning', 'inapp,email', '30', 'true'],
+    ]
+    const csv = rows.map(r => r.map(v => `"${v.replace(/"/g, '""')}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = 'pktsnmp-alert-rules-template.csv'; a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleExportRules = async () => {
+    setRulesExporting(true)
+    try {
+      const res = await fetch('/api/alerts/rules/export', { headers: authHeaders() })
+      if (!res.ok) throw new Error(`Export failed: ${res.status}`)
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = 'pktsnmp-alert-rules.csv'; a.click()
+      URL.revokeObjectURL(url)
+    } catch (e: any) { setError(e.message) }
+    finally { setRulesExporting(false) }
+  }
+
+  const handleImportRulesFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const headers: Record<string, string> = { 'Authorization': `Bearer ${getToken() ?? ''}` }
+      const res = await fetch('/api/alerts/rules/import-csv', { method: 'POST', headers, body: formData })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }))
+        throw new Error(err.detail || res.statusText)
+      }
+      const result = await res.json()
+      setRulesImportResult(result)
+      if (result.created > 0) await loadRules()
+    } catch (e: any) { setError(e.message) }
+  }
+
   const handleSaveRule = async (form: RuleFormData) => {
     setSaving(true)
     setError('')
@@ -1046,12 +1262,30 @@ export default function Alerts() {
           </button>
         )}
         {tab === 'rules' && !addingRule && !editRule && (
-          <button
-            onClick={() => setAddingRule(true)}
-            className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg px-4 py-2 transition-colors"
-          >
-            + New rule
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={handleExportRules} disabled={rulesExporting}
+              className="px-3 py-2 text-sm bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors disabled:opacity-50">
+              {rulesExporting ? 'Exporting…' : '↓ Export CSV'}
+            </button>
+            <div className="flex items-center gap-1">
+              <button onClick={() => rulesImportFileRef.current?.click()}
+                className="px-3 py-2 text-sm bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors rounded-r-none border-r border-gray-600">
+                ↑ Import CSV
+              </button>
+              <button onClick={handleDownloadRulesTemplate} title="Download CSV template"
+                className="px-2 py-2 text-sm bg-gray-700 hover:bg-gray-600 text-gray-400 hover:text-white rounded-lg transition-colors rounded-l-none"
+                aria-label="Download template">
+                template
+              </button>
+            </div>
+            <input ref={rulesImportFileRef} type="file" accept=".csv" className="hidden" onChange={handleImportRulesFile} />
+            <button
+              onClick={() => setAddingRule(true)}
+              className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg px-4 py-2 transition-colors"
+            >
+              + New rule
+            </button>
+          </div>
         )}
       </div>
 
@@ -1098,6 +1332,7 @@ export default function Alerts() {
               <option value="info">Info</option>
             </select>
             {eventsSevFilter && <button onClick={() => setEventsSevFilter('')} className="text-xs text-white hover:text-white">✕</button>}
+            <TimeRangeControl onChange={setEventsWindow} />
             {(eventsFilter || eventsSevFilter) && (
               <span className="text-xs text-white ml-auto">
                 {events.filter(e =>
@@ -1156,6 +1391,7 @@ export default function Alerts() {
               <option value="info">Info</option>
             </select>
             {historySevFilter && <button onClick={() => setHistorySevFilter('')} className="text-xs text-white hover:text-white">✕</button>}
+            <TimeRangeControl onChange={setHistoryWindow} />
             {(historyFilter || historySevFilter) && (
               <span className="text-xs text-white ml-auto">
                 {history.filter(e =>
@@ -1324,7 +1560,16 @@ export default function Alerts() {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-xs text-white">{rule.channels.join(', ')}</td>
-                        <td className="px-4 py-3 text-xs text-white">{rule.cooldown_min}m</td>
+                        <td className="px-4 py-3">
+                          {(() => {
+                            const grp = ruleGroup(rule.rule_type)
+                            return (
+                              <span className={`text-xs px-2 py-0.5 rounded-full ${TOPIC_STYLES[grp] ?? 'bg-gray-800 text-gray-400'}`}>
+                                {rule.cooldown_min}m
+                              </span>
+                            )
+                          })()}
+                        </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-3">
                             <button
@@ -1333,14 +1578,12 @@ export default function Alerts() {
                             >
                               Edit
                             </button>
-                            {!rule.builtin && (
-                              <button
-                                onClick={() => handleDeleteRule(rule.id)}
-                                className="text-xs text-white hover:text-red-400 transition-colors"
-                              >
-                                Delete
-                              </button>
-                            )}
+                            <button
+                              onClick={() => handleDeleteRule(rule.id)}
+                              className="text-xs text-white hover:text-red-400 transition-colors"
+                            >
+                              Delete
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -1357,6 +1600,44 @@ export default function Alerts() {
               </div>
             )
           })()}
+        </div>
+      )}
+
+      {rulesImportResult && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 py-8 px-4" onClick={() => setRulesImportResult(null)}>
+          <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 max-w-lg w-full" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold text-white mb-3">Import complete</h3>
+            <div className="space-y-1 mb-4">
+              <p className="text-sm text-green-400">✓ {rulesImportResult.created} rule{rulesImportResult.created !== 1 ? 's' : ''} created</p>
+              {rulesImportResult.skipped > 0 && (
+                <p className="text-sm text-yellow-400">⚠ {rulesImportResult.skipped} row{rulesImportResult.skipped !== 1 ? 's' : ''} skipped</p>
+              )}
+            </div>
+            {rulesImportResult.errors.length > 0 && (
+              <div className="bg-gray-800 rounded-lg px-3 py-2 max-h-36 overflow-y-auto mb-4">
+                {rulesImportResult.errors.map((e, i) => (
+                  <p key={i} className="text-xs text-red-400 font-mono">{e}</p>
+                ))}
+              </div>
+            )}
+            <div className="bg-gray-800/60 rounded-lg px-3 py-2 mb-4">
+              <p className="text-xs font-medium text-gray-400 mb-1">CSV columns (header row required)</p>
+              <p className="text-xs font-mono text-gray-500 break-all">
+                name, description, rule_type, conditions, time_window_min, severity, channels, cooldown_min, enabled
+              </p>
+              <p className="text-xs text-gray-600 mt-1">
+                conditions: a JSON object string — shape depends on rule_type. channels: comma-separated (e.g. inapp,slack).
+              </p>
+            </div>
+            <div className="flex items-center justify-between">
+              <button onClick={handleDownloadRulesTemplate} className="text-xs text-blue-400 hover:text-blue-300 transition-colors">
+                ↓ Download template
+              </button>
+              <button onClick={() => setRulesImportResult(null)} className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg">
+                Done
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -43,6 +43,7 @@ async def get_logs(
     logger: Optional[str] = Query(None, description="Logger name prefix filter"),
     search: Optional[str] = Query(None, description="Full-text search in message"),
     since: Optional[str] = Query(None, description="ISO timestamp lower bound"),
+    until: Optional[str] = Query(None, description="ISO timestamp upper bound"),
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
@@ -66,6 +67,10 @@ async def get_logs(
     if since:
         conditions.append("ts >= ?")
         params.append(since)
+
+    if until:
+        conditions.append("ts <= ?")
+        params.append(until)
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
