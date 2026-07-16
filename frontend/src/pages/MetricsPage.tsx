@@ -511,7 +511,7 @@ function IfaceRow({
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-type ViewMode = 'overview' | 'device' | 'interface'
+type ViewMode = 'overview' | 'device' | 'interface' | 'system'
 const TIME_RANGES: { value: TimeRange; label: string }[] = [
   { value: '1h', label: '1h' }, { value: '6h', label: '6h' },
   { value: '24h', label: '24h' }, { value: '7d', label: '7d' },
@@ -561,6 +561,7 @@ export default function MetricsPage() {
     if (devId) {
       setSelDev(Number(devId))
       if (view === 'interface' && ifLabel) { setSelIf(ifLabel); setViewMode('interface') }
+      else if (view === 'system') setViewMode('system')
       else setViewMode('device')
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -632,6 +633,10 @@ export default function MetricsPage() {
 
   const goInterface = useCallback((label: string) => {
     setSelIf(label); setViewMode('interface'); pushUrl('interface', selectedDeviceId!, label)
+  }, [selectedDeviceId, pushUrl])
+
+  const goSystem = useCallback(() => {
+    setSelIf(null); setViewMode('system'); pushUrl('system', selectedDeviceId!)
   }, [selectedDeviceId, pushUrl])
 
   const goOverview = useCallback(() => {
@@ -708,6 +713,10 @@ export default function MetricsPage() {
             {selectedIface && <>
               <span className="text-gray-600">/</span>
               <span className="text-gray-200 font-medium truncate max-w-[160px]">{selectedIface.name}</span>
+            </>}
+            {viewMode === 'system' && <>
+              <span className="text-gray-600">/</span>
+              <span className="text-gray-200 font-medium truncate max-w-[160px]">System Resources</span>
             </>}
           </nav>
 
@@ -811,8 +820,8 @@ export default function MetricsPage() {
         </div>
       )}
 
-      {/* ── DEVICE / INTERFACE ── */}
-      {(viewMode === 'device' || viewMode === 'interface') && selectedCard && (
+      {/* ── DEVICE / INTERFACE / SYSTEM ── */}
+      {(viewMode === 'device' || viewMode === 'interface' || viewMode === 'system') && selectedCard && (
         <div className="flex overflow-hidden" style={{ height: 'calc(100vh - 57px)' }}>
 
           {/* Interface sidebar */}
@@ -836,6 +845,17 @@ export default function MetricsPage() {
                   Reset {hiddenIfaces.size} hidden interface{hiddenIfaces.size !== 1 ? 's' : ''}
                 </button>
               )}
+              <button
+                onClick={goSystem}
+                className={[
+                  'mt-2 flex items-center gap-1.5 text-xs font-medium rounded-md px-1.5 py-1 -mx-1.5 transition-colors',
+                  viewMode === 'system'
+                    ? 'bg-blue-600/20 text-blue-300'
+                    : 'text-gray-400 hover:bg-gray-800/60 hover:text-gray-200',
+                ].join(' ')}
+              >
+                🖥️ System Resources
+              </button>
             </div>
 
             {/* Interface list */}
@@ -960,75 +980,80 @@ export default function MetricsPage() {
             </div>
 
             {/* Metric sections — always rendered, show empty state if no data */}
-            <ChartSection
-              title="Traffic (bits/sec)"
-              data={chartData.traffic}
-              oids={OID_GROUPS.traffic.oids}
-              colors={OID_GROUPS.traffic.color}
-              unit="bps"
-              alertEvents={history?.alert_events}
-            />
-            <ChartSection
-              title="Packets (per sec)"
-              data={chartData.packets}
-              oids={OID_GROUPS.packets.oids}
-              colors={OID_GROUPS.packets.color}
-              unit="pkt/s"
-              alertEvents={history?.alert_events}
-            />
-            <ChartSection
-              title="Errors & Discards (per sec)"
-              data={chartData.errors}
-              oids={OID_GROUPS.errors.oids}
-              colors={OID_GROUPS.errors.color}
-              unit="/s"
-              alertEvents={history?.alert_events}
-            />
-            <ChartSection
-              title="System Resources (CPU %, Memory, Storage)"
-              data={chartData.system}
-              oids={OID_GROUPS.system.oids}
-              colors={OID_GROUPS.system.color}
-              unit=""
-              alertEvents={history?.alert_events}
-            />
-            <ChartSection
-              title="IP / Protocol (receives, requests, TCP sessions, UDP)"
-              data={chartData.ip}
-              oids={OID_GROUPS.ip.oids}
-              colors={OID_GROUPS.ip.color}
-              unit="/s"
-              alertEvents={history?.alert_events}
-            />
-            {groupHasData(chartData.panTraffic, OID_GROUPS.panTraffic.oids) && (
+            {viewMode === 'system' ? (
               <ChartSection
-                title="PAN-OS Interface Traffic (bits/sec)"
-                data={chartData.panTraffic}
-                oids={OID_GROUPS.panTraffic.oids}
-                colors={OID_GROUPS.panTraffic.color}
-                unit="bps"
-                alertEvents={history?.alert_events}
-              />
-            )}
-            {groupHasData(chartData.panPackets, OID_GROUPS.panPackets.oids) && (
-              <ChartSection
-                title="PAN-OS Interface Packets (per sec)"
-                data={chartData.panPackets}
-                oids={OID_GROUPS.panPackets.oids}
-                colors={OID_GROUPS.panPackets.color}
-                unit="pkt/s"
-                alertEvents={history?.alert_events}
-              />
-            )}
-            {groupHasData(chartData.panFirewall, OID_GROUPS.panFirewall.oids) && (
-              <ChartSection
-                title="PAN-OS Firewall Health (CPU %, Sessions)"
-                data={chartData.panFirewall}
-                oids={OID_GROUPS.panFirewall.oids}
-                colors={OID_GROUPS.panFirewall.color}
+                title="System Resources (CPU %, Memory, Storage)"
+                data={chartData.system}
+                oids={OID_GROUPS.system.oids}
+                colors={OID_GROUPS.system.color}
                 unit=""
                 alertEvents={history?.alert_events}
               />
+            ) : (
+              <>
+                <ChartSection
+                  title="Traffic (bits/sec)"
+                  data={chartData.traffic}
+                  oids={OID_GROUPS.traffic.oids}
+                  colors={OID_GROUPS.traffic.color}
+                  unit="bps"
+                  alertEvents={history?.alert_events}
+                />
+                <ChartSection
+                  title="Packets (per sec)"
+                  data={chartData.packets}
+                  oids={OID_GROUPS.packets.oids}
+                  colors={OID_GROUPS.packets.color}
+                  unit="pkt/s"
+                  alertEvents={history?.alert_events}
+                />
+                <ChartSection
+                  title="Errors & Discards (per sec)"
+                  data={chartData.errors}
+                  oids={OID_GROUPS.errors.oids}
+                  colors={OID_GROUPS.errors.color}
+                  unit="/s"
+                  alertEvents={history?.alert_events}
+                />
+                <ChartSection
+                  title="IP / Protocol (receives, requests, TCP sessions, UDP)"
+                  data={chartData.ip}
+                  oids={OID_GROUPS.ip.oids}
+                  colors={OID_GROUPS.ip.color}
+                  unit="/s"
+                  alertEvents={history?.alert_events}
+                />
+                {groupHasData(chartData.panTraffic, OID_GROUPS.panTraffic.oids) && (
+                  <ChartSection
+                    title="PAN-OS Interface Traffic (bits/sec)"
+                    data={chartData.panTraffic}
+                    oids={OID_GROUPS.panTraffic.oids}
+                    colors={OID_GROUPS.panTraffic.color}
+                    unit="bps"
+                    alertEvents={history?.alert_events}
+                  />
+                )}
+                {groupHasData(chartData.panPackets, OID_GROUPS.panPackets.oids) && (
+                  <ChartSection
+                    title="PAN-OS Interface Packets (per sec)"
+                    data={chartData.panPackets}
+                    oids={OID_GROUPS.panPackets.oids}
+                    colors={OID_GROUPS.panPackets.color}
+                    unit="pkt/s"
+                    alertEvents={history?.alert_events}
+                  />
+                )}
+                {groupHasData(chartData.panFirewall, OID_GROUPS.panFirewall.oids) && (
+                  <ChartSection
+                    title="PAN-OS Firewall Health (CPU %, Sessions)"
+                    data={chartData.panFirewall}
+                    oids={OID_GROUPS.panFirewall.oids}
+                    colors={OID_GROUPS.panFirewall.color}
+                    unit=""
+                    alertEvents={history?.alert_events}
+                  />
+                )}
+              </>
             )}
 
             {/* Alert event log */}
