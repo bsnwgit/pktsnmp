@@ -289,10 +289,19 @@ function DeviceNode({
   return (
     <div>
       <div
-        className={`flex items-center gap-2 py-2.5 hover:bg-gray-800/40 transition-colors cursor-pointer group ${isAlerting ? 'bg-red-950/10' : ''}`}
+        className={`relative flex items-center gap-2 py-2.5 transition-colors group ${
+          node.enabled ? 'hover:bg-gray-800/40 cursor-pointer' : 'cursor-not-allowed'
+        } ${isAlerting ? 'bg-red-950/10' : ''}`}
         style={{ paddingLeft: `${16 + depth * 20}px` }}
-        onClick={() => onNavigate(node)}
+        onClick={() => { if (node.enabled) onNavigate(node) }}
       >
+        {!node.enabled && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="w-full h-5 bg-gray-950/75 border-y border-gray-700/60 flex items-center justify-center">
+              <span className="text-[10px] font-extrabold tracking-[0.2em] text-red-500">DISABLED</span>
+            </div>
+          </div>
+        )}
         {/* Expand toggle */}
         <button
           className={`flex-shrink-0 w-5 h-5 flex items-center justify-center rounded hover:bg-gray-700/60 transition-colors text-gray-500 hover:text-gray-300 ${!hasChildren ? 'invisible' : ''}`}
@@ -315,21 +324,21 @@ function DeviceNode({
             {node.name}
           </span>
           {node.device_type && (
-            <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-gray-800/60 text-gray-500 border border-gray-700/50">
+            <span className="ml-2 text-xs px-2.5 py-1 rounded bg-gray-800/60 text-gray-300 border border-gray-700/50">
               {node.device_type.replace('_', ' ')}
             </span>
           )}
           {node.ha_role && (
-            <span className={`ml-2 text-xs font-medium px-1.5 py-0.5 rounded ${
+            <span className={`ml-2 text-xs font-medium px-2.5 py-1 rounded ${
               node.ha_role === 'active'
                 ? 'bg-blue-900/40 text-blue-300 border border-blue-700/40'
-                : 'bg-gray-800 text-gray-500 border border-gray-700'
+                : 'bg-gray-800 text-gray-300 border border-gray-700'
             }`}>
               {node.ha_role}
             </span>
           )}
           {node.parent_name && (
-            <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-gray-800/60 text-gray-500 border border-gray-700/50">
+            <span className="ml-2 text-xs px-2.5 py-1 rounded bg-gray-800/60 text-gray-300 border border-gray-700/50">
               Parent: {node.parent_name}
             </span>
           )}
