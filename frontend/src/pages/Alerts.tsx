@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { getToken, OID_META } from '../api/client'
 
 // ── Time range ────────────────────────────────────────────────────────────────
@@ -726,8 +726,38 @@ function DetailsPanel({ details }: { details: DetailMap }) {
   )
 }
 
+// ── Investigate URL builder ───────────────────────────────────────────────────
+
+const TRAP_RULE_TYPES = new Set(['unknown_trap_source', 'trap_rate_spike', 'trap_oid_match', 'trap_received'])
+
+function buildInvestigateUrl(event: AlertEvent): string {
+  const d = event.details as Record<string, any>
+  const windowMin: number = typeof d.window_min === 'number' ? d.window_min : 30
+
+  // Collector-scoped alerts have no device to drill into — go to the
+  // Collectors page and highlight the specific one.
+  if (event.rule_type === 'collector_gap' && d.collector_id) {
+    return `/collectors?highlight=${d.collector_id}`
+  }
+
+  // Trap-related alerts have no dedicated trap explorer in this app yet —
+  // the Dashboard's recent-traps widget is the closest available view.
+  if (TRAP_RULE_TYPES.has(event.rule_type)) {
+    return '/'
+  }
+
+  // Device / interface / metric / threshold rules all carry a device_id.
+  if (d.device_id) {
+    const since = windowMin <= 60 ? '1h' : windowMin <= 360 ? '6h' : windowMin <= 1440 ? '24h' : '7d'
+    return `/metrics?view=device&device=${d.device_id}&since=${since}`
+  }
+
+  return '/metrics'
+}
+
 // ── Alert event card ──────────────────────────────────────────────────────────
 function EventCard({ event, onAck }: { event: AlertEvent; onAck: (id: number) => void }) {
+  const navigate = useNavigate()
   const [expanded, setExpanded] = useState(false)
   const isAcked    = Boolean(event.acked_at)
   const isResolved = Boolean(event.resolved_at) && !isAcked
@@ -757,6 +787,13 @@ function EventCard({ event, onAck }: { event: AlertEvent; onAck: (id: number) =>
         </div>
         <div className="shrink-0 flex items-center gap-2">
           <span className="text-xs text-white">{fmtTime(event.fired_at)}</span>
+          <button
+            onClick={() => navigate(buildInvestigateUrl(event))}
+            className="text-xs bg-gray-800 hover:bg-gray-700 text-blue-400 hover:text-blue-300 border border-blue-500/40 rounded px-2.5 py-1 transition-colors"
+            title="Jump to the relevant device, collector, or dashboard view"
+          >
+            Investigate ↗
+          </button>
           {!isAcked && (
             <button
               onClick={() => onAck(event.id)}
