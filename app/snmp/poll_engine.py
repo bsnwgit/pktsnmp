@@ -165,6 +165,7 @@ class PollEngine:
 
         results: list[dict] = []
         start = time.monotonic()
+        engine: SnmpEngine | None = None
 
         try:
             engine = SnmpEngine()
@@ -191,8 +192,14 @@ class PollEngine:
             else:
                 auth_data = CommunityData(device.get("community") or "public")
 
-            # Limit OIDs per poll cycle to avoid overwhelming the device
-            polled_oids = oids[:20]
+            # Poll every catalog OID — vendor-specific / inapplicable ones just get a
+            # fast noSuchObject/noSuchInstance response from the agent and are skipped
+            # below, so this doesn't meaningfully slow down a poll cycle. A previous
+            # `oids[:20]` cap silently dropped every OID catalog row past position 20
+            # (rowid order, not relevance), which happened to exclude every
+            # HOST-RESOURCES-MIB (hr*) and vendor-specific (pan*/cisco*/etc.) OID —
+            # System Resources and vendor health panels never had any data as a result.
+            polled_oids = oids
 
             # ifTable columns are indexed per-interface — resolve ifIndex -> ifDescr
             # once so those rows can be labeled, instead of GETting the bare column OID.
@@ -299,6 +306,15 @@ class PollEngine:
 
         except Exception as e:
             log.warning(f"Poll failed for device {device['ip']}: {e}")
+        finally:
+            # SnmpEngine holds an open UDP socket via its transport dispatcher —
+            # never closing it leaks one fd per device per poll cycle, eventually
+            # exhausting the process's open-file limit.
+            if engine is not None:
+                try:
+                    engine.closeDispatcher()
+                except Exception as e:
+                    log.debug(f"closeDispatcher failed for {device['ip']}: {e}")
 
         return results
 
