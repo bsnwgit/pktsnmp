@@ -486,6 +486,91 @@ async def rotate_collector_token(collector_id: int, _: AdminUser, db: aiosqlite.
     return {"id": collector_id, "api_token": new_token, "note": "Token shown once -- store it now"}
 
 
+@router.get("/collectors/export")
+async def export_collectors(_: CurrentUser, db: aiosqlite.Connection = Depends(get_db)):
+    """Export all collectors as a CSV file download. API tokens are never included."""
+    import csv
+    import io
+    from fastapi.responses import StreamingResponse
+
+    db.row_factory = aiosqlite.Row
+    async with db.execute(
+        "SELECT name, description, ip FROM collectors WHERE id != 1 ORDER BY name"
+    ) as cur:
+        rows = await cur.fetchall()
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["name", "description", "ip"])
+    for r in rows:
+        writer.writerow([r["name"], r["description"] or "", r["ip"] or ""])
+    buf.seek(0)
+    return StreamingResponse(
+        io.BytesIO(buf.getvalue().encode("utf-8")),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="pktsnmp-collectors.csv"'},
+    )
+
+
+@router.post("/collectors/import-csv")
+async def import_collectors_csv(
+    file: UploadFile,
+    _: AdminUser,
+    db: aiosqlite.Connection = Depends(get_db),
+) -> dict:
+    """Import collectors from a multipart CSV upload.
+
+    CSV columns (header row required): name, description, ip
+
+    - Each row creates a new collector with a freshly generated API token
+      (tokens are never accepted from the CSV — SSH credentials and tokens
+      are always issued/configured after creation, same as a single Add).
+    - Rows are inserted; duplicate names are skipped (not updated).
+    - Generated tokens are returned once in the response — copy them now,
+      the same as the single-collector "Add" flow.
+    """
+    import csv, io
+
+    raw = await file.read()
+    text = raw.decode("utf-8-sig")  # strip BOM (Excel exports)
+
+    reader = csv.DictReader(io.StringIO(text))
+    created = 0
+    skipped = 0
+    errors: list[str] = []
+    tokens: list[dict] = []
+
+    for lineno, row in enumerate(reader, start=2):
+        name = (row.get("name") or "").strip()
+        if not name:
+            errors.append(f"Row {lineno}: missing name — skipped")
+            skipped += 1
+            continue
+
+        description = (row.get("description") or "").strip()
+        ip = (row.get("ip") or "").strip() or None
+        token = secrets.token_urlsafe(32)
+
+        try:
+            async with db.execute(
+                "INSERT OR IGNORE INTO collectors (name, description, ip, api_token) VALUES (?,?,?,?) RETURNING id",
+                (name, description, ip, token),
+            ) as cur:
+                result_row = await cur.fetchone()
+            if result_row:
+                created += 1
+                tokens.append({"id": result_row[0], "name": name, "api_token": token})
+            else:
+                skipped += 1
+                errors.append(f"Row {lineno}: {name} already exists — skipped")
+        except Exception as exc:
+            errors.append(f"Row {lineno}: {name}: {exc}")
+            skipped += 1
+
+    await db.commit()
+    return {"created": created, "skipped": skipped, "errors": errors, "tokens": tokens}
+
+
 @router.put("/collectors/{collector_id}/ssh")
 async def update_collector_ssh(
     collector_id: int, body: CollectorSSHUpdate, _: AdminUser,
@@ -1231,6 +1316,91 @@ async def delete_oid(oid_id: int, _: AdminUser, db: aiosqlite.Connection = Depen
         raise HTTPException(status_code=400, detail="Cannot delete bundled OIDs")
     await db.execute("DELETE FROM oid_catalog WHERE id=?", (oid_id,))
     await db.commit()
+
+
+@router.get("/oids/export")
+async def export_oids(_: CurrentUser, db: aiosqlite.Connection = Depends(get_db)):
+    """Export user-added OIDs as a CSV file download. Bundled entries are excluded —
+    they ship with every install and aren't meant to be round-tripped."""
+    import csv
+    import io
+    from fastapi.responses import StreamingResponse
+
+    db.row_factory = aiosqlite.Row
+    async with db.execute(
+        "SELECT oid, name, description, unit, data_type FROM oid_catalog WHERE source != 'bundled' ORDER BY oid"
+    ) as cur:
+        rows = await cur.fetchall()
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["oid", "name", "description", "unit", "data_type"])
+    for r in rows:
+        writer.writerow([r["oid"], r["name"], r["description"] or "", r["unit"] or "", r["data_type"]])
+    buf.seek(0)
+    return StreamingResponse(
+        io.BytesIO(buf.getvalue().encode("utf-8")),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="pktsnmp-oids.csv"'},
+    )
+
+
+@router.post("/oids/import-csv")
+async def import_oids_csv(
+    file: UploadFile,
+    _: AdminUser,
+    db: aiosqlite.Connection = Depends(get_db),
+) -> dict:
+    """Import a large OID set from a multipart CSV upload — for adding many OIDs
+    at once (a vendor MIB dump, a shared team catalog, etc.) instead of one at a time.
+
+    CSV columns (header row required): oid, name, description, unit, data_type
+      data_type: gauge | counter | string | timeticks | ipaddress (defaults to 'gauge')
+
+    Rows are inserted; duplicate OID strings are skipped (not updated) — edit the
+    existing entry instead if you need to change one.
+    """
+    import csv, io
+
+    raw = await file.read()
+    text = raw.decode("utf-8-sig")  # strip BOM (Excel exports)
+
+    valid_types = {"gauge", "counter", "string", "timeticks", "ipaddress"}
+    reader = csv.DictReader(io.StringIO(text))
+    created = 0
+    skipped = 0
+    errors: list[str] = []
+
+    for lineno, row in enumerate(reader, start=2):
+        oid  = (row.get("oid") or "").strip()
+        name = (row.get("name") or "").strip()
+        if not oid or not name:
+            errors.append(f"Row {lineno}: missing oid or name — skipped")
+            skipped += 1
+            continue
+
+        data_type = (row.get("data_type") or "gauge").strip().lower()
+        if data_type not in valid_types:
+            data_type = "gauge"
+
+        try:
+            async with db.execute(
+                """INSERT OR IGNORE INTO oid_catalog (oid, name, description, unit, data_type, source)
+                   VALUES (?,?,?,?,?,'user') RETURNING id""",
+                (oid, name, (row.get("description") or "").strip(), (row.get("unit") or "").strip(), data_type),
+            ) as cur:
+                result_row = await cur.fetchone()
+            if result_row:
+                created += 1
+            else:
+                skipped += 1
+                errors.append(f"Row {lineno}: {oid} ({name}) already exists — skipped")
+        except Exception as exc:
+            errors.append(f"Row {lineno}: {oid} ({name}): {exc}")
+            skipped += 1
+
+    await db.commit()
+    return {"created": created, "skipped": skipped, "errors": errors}
 
 
 # =============================================================================

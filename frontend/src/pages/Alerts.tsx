@@ -2,6 +2,153 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { getToken, OID_META } from '../api/client'
 
+// ── Time range ────────────────────────────────────────────────────────────────
+
+const TIME_RANGES = [
+  { value: '1h',     label: '1h' },
+  { value: '6h',     label: '6h' },
+  { value: '24h',    label: '24h' },
+  { value: '7d',     label: '7d' },
+  { value: '30d',    label: '30d' },
+  { value: 'all',    label: 'All time' },
+  { value: 'custom', label: 'Custom range…' },
+] as const
+type TimeRange = typeof TIME_RANGES[number]['value']
+
+const TIME_RANGE_MS: Record<Exclude<TimeRange, 'all' | 'custom'>, number> = {
+  '1h':  60 * 60 * 1000,
+  '6h':  6 * 60 * 60 * 1000,
+  '24h': 24 * 60 * 60 * 1000,
+  '7d':  7 * 24 * 60 * 60 * 1000,
+  '30d': 30 * 24 * 60 * 60 * 1000,
+}
+
+export interface TimeWindow {
+  since?: string
+  until?: string
+}
+
+// datetime-local values are local wall-clock time with no timezone info, so
+// format from local (not UTC) date components — a plain toISOString() would
+// shift the displayed clock time by the browser's UTC offset.
+function toLocalInputValue(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+function todayStart(): string {
+  const d = new Date()
+  d.setHours(0, 0, 0, 0)
+  return toLocalInputValue(d)
+}
+function todayEnd(): string {
+  const d = new Date()
+  d.setHours(23, 59, 0, 0)
+  return toLocalInputValue(d)
+}
+/** Never allow a future moment — clamp back to right now instead. */
+function clampFuture(value: string): string {
+  if (!value) return value
+  const now = new Date()
+  return new Date(value).getTime() > now.getTime() ? toLocalInputValue(now) : value
+}
+
+/**
+ * Preset + custom date/time range picker. Owns its own preset/from/to UI state
+ * and reports the resolved {since, until} ISO bounds up to the parent — as logs
+ * or alert history grow, a preset alone won't always pinpoint the right window.
+ *
+ * Validation: neither side can be in the future (clamped back to now — both via
+ * the inputs' own `max` and as a typed-input backstop), and "to" must be after
+ * "from" (same-day-with-earlier-end-time counts as invalid too, since it's a
+ * plain datetime comparison, not just a date comparison) — an invalid range
+ * shows an inline error and does not get applied, leaving the last valid window.
+ */
+function TimeRangeControl({ onChange }: { onChange: (window: TimeWindow) => void }) {
+  const [preset, setPreset]         = useState<TimeRange>('all')
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo, setCustomTo]     = useState('')
+  const [rangeError, setRangeError] = useState('')
+
+  const emit = (p: TimeRange, from: string, to: string) => {
+    if (p === 'custom') {
+      onChange({
+        since: from ? new Date(from).toISOString() : undefined,
+        until: to ? new Date(to).toISOString() : undefined,
+      })
+    } else if (p === 'all') {
+      onChange({})
+    } else {
+      onChange({ since: new Date(Date.now() - TIME_RANGE_MS[p]).toISOString() })
+    }
+  }
+
+  const applyCustom = (from: string, to: string) => {
+    if (from && to && new Date(to).getTime() < new Date(from).getTime()) {
+      setRangeError('End date/time must be after the start date/time.')
+      return
+    }
+    setRangeError('')
+    emit('custom', from, to)
+  }
+
+  const nowLocal = toLocalInputValue(new Date())
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <select
+        value={preset}
+        onChange={e => {
+          const p = e.target.value as TimeRange
+          setPreset(p)
+          setRangeError('')
+          if (p === 'custom') {
+            // Default to today's full day (12:00 AM – 11:59 PM), clamped to
+            // "now" since the end can't be in the future.
+            const from = customFrom || todayStart()
+            const to   = clampFuture(customTo || todayEnd())
+            setCustomFrom(from)
+            setCustomTo(to)
+            applyCustom(from, to)
+          } else {
+            emit(p, customFrom, customTo)
+          }
+        }}
+        className="bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1 text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+      >
+        {TIME_RANGES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+      </select>
+      {preset === 'custom' && (
+        <>
+          <input
+            type="datetime-local"
+            value={customFrom}
+            max={nowLocal}
+            onChange={e => {
+              const v = clampFuture(e.target.value)
+              setCustomFrom(v)
+              applyCustom(v, customTo)
+            }}
+            className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          <span className="text-xs text-gray-500">to</span>
+          <input
+            type="datetime-local"
+            value={customTo}
+            max={nowLocal}
+            onChange={e => {
+              const v = clampFuture(e.target.value)
+              setCustomTo(v)
+              applyCustom(customFrom, v)
+            }}
+            className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          {rangeError && <span className="text-xs text-red-400">{rangeError}</span>}
+        </>
+      )}
+    </div>
+  )
+}
+
 // ── Interfaces ────────────────────────────────────────────────────────────────
 
 interface AlertEvent {
@@ -29,7 +176,6 @@ interface AlertRule {
   channels: string[]
   cooldown_min: number
   enabled: boolean
-  builtin?: number
   created_at: string
   updated_at: string
 }
@@ -37,7 +183,14 @@ interface AlertRule {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtTime(ts: string): string {
-  return new Date(ts).toLocaleString([], {
+  // fired_at is stored as naive UTC (SQLite's datetime('now'), no 'Z'/offset) —
+  // without forcing UTC interpretation here, the browser parses it as local
+  // time and displays the raw UTC wall-clock numbers mislabeled as local,
+  // which can shift the shown date across midnight relative to the true
+  // local time (e.g. a late-UTC event from "yesterday evening" locally
+  // shows as "today" instead).
+  const utc = ts.includes('T') || ts.endsWith('Z') ? ts : ts.replace(' ', 'T') + 'Z'
+  return new Date(utc).toLocaleString([], {
     month: 'short', day: 'numeric',
     hour: '2-digit', minute: '2-digit', second: '2-digit',
   })
@@ -51,7 +204,10 @@ const SEV_STYLES: Record<string, string> = {
 
 const TOPIC_STYLES: Record<string, string> = {
   Device:    'bg-sky-500/15 text-sky-400 border border-sky-500/30',
+  Interface: 'bg-indigo-500/15 text-indigo-400 border border-indigo-500/30',
+  Metric:    'bg-violet-500/15 text-violet-400 border border-violet-500/30',
   Trap:      'bg-orange-500/15 text-orange-400 border border-orange-500/30',
+  Collector: 'bg-teal-500/15 text-teal-400 border border-teal-500/30',
   Threshold: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30',
 }
 
@@ -883,8 +1039,10 @@ export default function Alerts() {
   const [error, setError]           = useState('')
   const [eventsFilter, setEventsFilter]         = useState('')
   const [eventsSevFilter, setEventsSevFilter]   = useState('')
+  const [eventsWindow, setEventsWindow]         = useState<TimeWindow>({})
   const [historyFilter, setHistoryFilter]       = useState('')
   const [historySevFilter, setHistorySevFilter] = useState('')
+  const [historyWindow, setHistoryWindow]       = useState<TimeWindow>({})
   const [rulesFilter, setRulesFilter]           = useState('')
   const [rulesTopicFilter, setRulesTopicFilter] = useState('')
   const [rulesSortKey, setRulesSortKey]         = useState<keyof AlertRule | 'topic' | null>(null)
@@ -904,16 +1062,25 @@ export default function Alerts() {
     setLoading(true)
     try {
       const headers = authHeaders()
+      const windowParams = (w: TimeWindow) => {
+        const p = new URLSearchParams()
+        if (w.since) p.set('since', w.since)
+        if (w.until) p.set('until', w.until)
+        const s = p.toString()
+        return s ? `&${s}` : ''
+      }
+      const activeUrl = `/api/alerts/events?acked=false&limit=200${windowParams(eventsWindow)}`
+      const ackedUrl  = `/api/alerts/events?acked=true&limit=200${windowParams(historyWindow)}`
       const [activeRes, ackedRes] = await Promise.all([
-        fetch('/api/alerts/events?acked=false&limit=200', { headers }),
-        fetch('/api/alerts/events?acked=true&limit=200', { headers }),
+        fetch(activeUrl, { headers }),
+        fetch(ackedUrl, { headers }),
       ])
       if (activeRes.ok) setEvents(await activeRes.json())
       if (ackedRes.ok)  setHistory(await ackedRes.json())
     } finally {
       setLoading(false)
     }
-  }, [authHeaders])
+  }, [authHeaders, eventsWindow, historyWindow])
 
   const loadRules = useCallback(async () => {
     const res = await fetch('/api/alerts/rules', { headers: authHeaders() })
@@ -1098,6 +1265,7 @@ export default function Alerts() {
               <option value="info">Info</option>
             </select>
             {eventsSevFilter && <button onClick={() => setEventsSevFilter('')} className="text-xs text-white hover:text-white">✕</button>}
+            <TimeRangeControl onChange={setEventsWindow} />
             {(eventsFilter || eventsSevFilter) && (
               <span className="text-xs text-white ml-auto">
                 {events.filter(e =>
@@ -1156,6 +1324,7 @@ export default function Alerts() {
               <option value="info">Info</option>
             </select>
             {historySevFilter && <button onClick={() => setHistorySevFilter('')} className="text-xs text-white hover:text-white">✕</button>}
+            <TimeRangeControl onChange={setHistoryWindow} />
             {(historyFilter || historySevFilter) && (
               <span className="text-xs text-white ml-auto">
                 {history.filter(e =>
@@ -1324,7 +1493,16 @@ export default function Alerts() {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-xs text-white">{rule.channels.join(', ')}</td>
-                        <td className="px-4 py-3 text-xs text-white">{rule.cooldown_min}m</td>
+                        <td className="px-4 py-3">
+                          {(() => {
+                            const grp = ruleGroup(rule.rule_type)
+                            return (
+                              <span className={`text-xs px-2 py-0.5 rounded-full ${TOPIC_STYLES[grp] ?? 'bg-gray-800 text-gray-400'}`}>
+                                {rule.cooldown_min}m
+                              </span>
+                            )
+                          })()}
+                        </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-3">
                             <button
@@ -1333,14 +1511,12 @@ export default function Alerts() {
                             >
                               Edit
                             </button>
-                            {!rule.builtin && (
-                              <button
-                                onClick={() => handleDeleteRule(rule.id)}
-                                className="text-xs text-white hover:text-red-400 transition-colors"
-                              >
-                                Delete
-                              </button>
-                            )}
+                            <button
+                              onClick={() => handleDeleteRule(rule.id)}
+                              className="text-xs text-white hover:text-red-400 transition-colors"
+                            >
+                              Delete
+                            </button>
                           </div>
                         </td>
                       </tr>
