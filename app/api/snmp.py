@@ -1726,6 +1726,10 @@ class LocationDefCreate(BaseModel):
     site_id: int
 
 
+class HierarchyRename(BaseModel):
+    name: str
+
+
 @router.get("/hierarchy")
 async def get_hierarchy(_: CurrentUser, db: aiosqlite.Connection = Depends(get_db)) -> list[dict]:
     """Return the full org → group → site → location hierarchy tree."""
@@ -1767,6 +1771,23 @@ async def create_org(body: OrgCreate, _: AdminUser, db: aiosqlite.Connection = D
     return {"id": row[0], "name": row[1], "groups": []}
 
 
+@router.put("/hierarchy/orgs/{org_id}")
+async def rename_org(org_id: int, body: HierarchyRename, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)) -> dict:
+    async with db.execute("SELECT id FROM orgs WHERE id=?", (org_id,)) as cur:
+        if not await cur.fetchone():
+            raise HTTPException(status_code=404, detail="Org not found")
+    try:
+        await db.execute(
+            "UPDATE orgs SET name=?, updated_at=datetime('now') WHERE id=?", (body.name.strip(), org_id)
+        )
+        await db.commit()
+    except Exception as e:
+        if "UNIQUE" in str(e):
+            raise HTTPException(status_code=409, detail=f"Org '{body.name}' already exists")
+        raise
+    return {"id": org_id, "name": body.name.strip()}
+
+
 @router.delete("/hierarchy/orgs/{org_id}", status_code=204)
 async def delete_org(org_id: int, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)) -> None:
     async with db.execute("SELECT id FROM orgs WHERE id=?", (org_id,)) as cur:
@@ -1793,6 +1814,23 @@ async def create_group_def(body: GroupDefCreate, _: AdminUser, db: aiosqlite.Con
             raise HTTPException(status_code=409, detail=f"Group '{body.name}' already exists in this org")
         raise
     return {"id": row[0], "name": row[1], "org_id": row[2], "sites": []}
+
+
+@router.put("/hierarchy/groups/{group_id}")
+async def rename_group_def(group_id: int, body: HierarchyRename, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)) -> dict:
+    async with db.execute("SELECT id FROM groups_def WHERE id=?", (group_id,)) as cur:
+        if not await cur.fetchone():
+            raise HTTPException(status_code=404, detail="Group not found")
+    try:
+        await db.execute(
+            "UPDATE groups_def SET name=?, updated_at=datetime('now') WHERE id=?", (body.name.strip(), group_id)
+        )
+        await db.commit()
+    except Exception as e:
+        if "UNIQUE" in str(e):
+            raise HTTPException(status_code=409, detail=f"Group '{body.name}' already exists in this org")
+        raise
+    return {"id": group_id, "name": body.name.strip()}
 
 
 @router.delete("/hierarchy/groups/{group_id}", status_code=204)
@@ -1823,6 +1861,23 @@ async def create_site_def(body: SiteDefCreate, _: AdminUser, db: aiosqlite.Conne
     return {"id": row[0], "name": row[1], "group_id": row[2], "locations": []}
 
 
+@router.put("/hierarchy/sites/{site_id}")
+async def rename_site_def(site_id: int, body: HierarchyRename, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)) -> dict:
+    async with db.execute("SELECT id FROM sites_def WHERE id=?", (site_id,)) as cur:
+        if not await cur.fetchone():
+            raise HTTPException(status_code=404, detail="Site not found")
+    try:
+        await db.execute(
+            "UPDATE sites_def SET name=?, updated_at=datetime('now') WHERE id=?", (body.name.strip(), site_id)
+        )
+        await db.commit()
+    except Exception as e:
+        if "UNIQUE" in str(e):
+            raise HTTPException(status_code=409, detail=f"Site '{body.name}' already exists in this group")
+        raise
+    return {"id": site_id, "name": body.name.strip()}
+
+
 @router.delete("/hierarchy/sites/{site_id}", status_code=204)
 async def delete_site_def(site_id: int, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)) -> None:
     async with db.execute("SELECT id FROM sites_def WHERE id=?", (site_id,)) as cur:
@@ -1849,6 +1904,23 @@ async def create_location_def(body: LocationDefCreate, _: AdminUser, db: aiosqli
             raise HTTPException(status_code=409, detail=f"Location '{body.name}' already exists in this site")
         raise
     return {"id": row[0], "name": row[1], "site_id": row[2]}
+
+
+@router.put("/hierarchy/locations/{location_id}")
+async def rename_location_def(location_id: int, body: HierarchyRename, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)) -> dict:
+    async with db.execute("SELECT id FROM locations_def WHERE id=?", (location_id,)) as cur:
+        if not await cur.fetchone():
+            raise HTTPException(status_code=404, detail="Location not found")
+    try:
+        await db.execute(
+            "UPDATE locations_def SET name=?, updated_at=datetime('now') WHERE id=?", (body.name.strip(), location_id)
+        )
+        await db.commit()
+    except Exception as e:
+        if "UNIQUE" in str(e):
+            raise HTTPException(status_code=409, detail=f"Location '{body.name}' already exists in this site")
+        raise
+    return {"id": location_id, "name": body.name.strip()}
 
 
 @router.delete("/hierarchy/locations/{location_id}", status_code=204)

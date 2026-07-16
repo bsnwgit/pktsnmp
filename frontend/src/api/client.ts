@@ -296,18 +296,26 @@ export const api = {
   getHierarchy: () => request<HierarchyOrg[]>('/snmp/hierarchy'),
   createHierarchyOrg: (name: string) =>
     request<HierarchyOrg>('/snmp/hierarchy/orgs', { method: 'POST', body: JSON.stringify({ name }) }),
+  updateHierarchyOrg: (id: number, name: string) =>
+    request<{ id: number; name: string }>(`/snmp/hierarchy/orgs/${id}`, { method: 'PUT', body: JSON.stringify({ name }) }),
   deleteHierarchyOrg: (id: number) =>
     request<void>(`/snmp/hierarchy/orgs/${id}`, { method: 'DELETE' }),
   createHierarchyGroup: (name: string, org_id: number) =>
     request<HierarchyGroup>('/snmp/hierarchy/groups', { method: 'POST', body: JSON.stringify({ name, org_id }) }),
+  updateHierarchyGroup: (id: number, name: string) =>
+    request<{ id: number; name: string }>(`/snmp/hierarchy/groups/${id}`, { method: 'PUT', body: JSON.stringify({ name }) }),
   deleteHierarchyGroup: (id: number) =>
     request<void>(`/snmp/hierarchy/groups/${id}`, { method: 'DELETE' }),
   createHierarchySite: (name: string, group_id: number) =>
     request<HierarchySite>('/snmp/hierarchy/sites', { method: 'POST', body: JSON.stringify({ name, group_id }) }),
+  updateHierarchySite: (id: number, name: string) =>
+    request<{ id: number; name: string }>(`/snmp/hierarchy/sites/${id}`, { method: 'PUT', body: JSON.stringify({ name }) }),
   deleteHierarchySite: (id: number) =>
     request<void>(`/snmp/hierarchy/sites/${id}`, { method: 'DELETE' }),
   createHierarchyLocation: (name: string, site_id: number) =>
     request<HierarchyLocation>('/snmp/hierarchy/locations', { method: 'POST', body: JSON.stringify({ name, site_id }) }),
+  updateHierarchyLocation: (id: number, name: string) =>
+    request<{ id: number; name: string }>(`/snmp/hierarchy/locations/${id}`, { method: 'PUT', body: JSON.stringify({ name }) }),
   deleteHierarchyLocation: (id: number) =>
     request<void>(`/snmp/hierarchy/locations/${id}`, { method: 'DELETE' }),
 }

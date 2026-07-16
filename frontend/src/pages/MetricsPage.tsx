@@ -297,10 +297,12 @@ function DeviceCard({ card, onClick }: { card: DeviceMetricsCard; onClick: () =>
 
   return (
     <button
-      onClick={onClick}
+      onClick={() => { if (device.enabled) onClick() }}
       className={[
-        'text-left w-full rounded-xl border p-4 transition-all duration-150',
-        'hover:border-blue-500/50 hover:shadow-lg hover:shadow-blue-900/10',
+        'relative text-left w-full rounded-xl border p-4 transition-all duration-150',
+        device.enabled
+          ? 'hover:border-blue-500/50 hover:shadow-lg hover:shadow-blue-900/10 cursor-pointer'
+          : 'cursor-not-allowed',
         'focus:outline-none focus:ring-2 focus:ring-blue-500/40',
         'ring-2 ring-transparent',
         STATUS_RING[status] ?? 'ring-gray-400/30',
@@ -309,6 +311,14 @@ function DeviceCard({ card, onClick }: { card: DeviceMetricsCard; onClick: () =>
           : 'bg-gray-900/50 border-gray-800/50 opacity-60',
       ].join(' ')}
     >
+      {!device.enabled && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10 rounded-xl overflow-hidden">
+          <div className="w-full h-8 bg-gray-950/75 border-y border-gray-700/60 flex items-center justify-center">
+            <span className="text-sm font-extrabold tracking-[0.2em] text-red-500">DISABLED</span>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="flex items-center gap-2 min-w-0">
@@ -384,7 +394,7 @@ function DeviceCard({ card, onClick }: { card: DeviceMetricsCard; onClick: () =>
         </div>
       )}
 
-      <p className="text-xs text-blue-400/50 text-right mt-2">View metrics →</p>
+      {device.enabled && <p className="text-xs text-blue-400/50 text-right mt-2">View metrics →</p>}
     </button>
   )
 }
