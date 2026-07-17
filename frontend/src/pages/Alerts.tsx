@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { getToken, OID_META } from '../api/client'
+import HelpButton from '../components/HelpButton'
 
 // ── Time range ────────────────────────────────────────────────────────────────
 
@@ -1277,7 +1278,15 @@ export default function Alerts() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-white">Alerts</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold text-white">Alerts</h1>
+            <HelpButton title="Alerts — How It Works">
+              <p>Rule types span five groups: <span className="text-gray-300 font-medium">Device</span> (down, poll failures, auth failures, poll gaps), <span className="text-gray-300 font-medium">Interface</span> (down, flapping), <span className="text-gray-300 font-medium">Metric</span> (threshold, spike, error/discard rate, bandwidth utilization, speed change), <span className="text-gray-300 font-medium">Trap</span> (unknown source, rate spike, OID match), and <span className="text-gray-300 font-medium">Collector</span>/Threshold (data gap, OID value threshold).</p>
+              <p><span className="text-gray-300 font-medium">Investigate</span> routes contextually by rule type — device/interface/metric alerts jump into Metrics pre-filtered to that device and time window, collector alerts jump to Collectors with that collector highlighted, and trap alerts (no dedicated trap explorer yet) land on the Dashboard's recent-traps view.</p>
+              <p>Auto-resolve means an open alert closes itself the next time its rule evaluates and the condition no longer holds — no need to manually clear it.</p>
+              <p>Rules can be bulk-provisioned via CSV — Export CSV to snapshot current rules, download the template for the expected columns, then Import CSV to create many at once.</p>
+            </HelpButton>
+          </div>
           <p className="text-sm text-white mt-0.5">
             {(() => {
               const active   = events.filter(e => !e.resolved_at).length
