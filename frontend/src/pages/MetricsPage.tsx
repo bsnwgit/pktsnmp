@@ -22,6 +22,7 @@ import {
   OID_META, TimeRange,
 } from '../api/client'
 import HelpButton from '../components/HelpButton'
+import IpLink from '../components/IpLink'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -898,7 +899,7 @@ export default function MetricsPage() {
                 <span>{DEVICE_TYPE_ICONS[selectedCard.device.device_type] ?? '📦'}</span>
                 <p className="font-semibold text-xs text-gray-200 truncate">{selectedCard.device.name}</p>
               </div>
-              <p className="text-xs font-mono text-gray-500">{selectedCard.device.ip}</p>
+              <p className="text-xs font-mono text-gray-500"><IpLink ip={selectedCard.device.ip} /></p>
               <div className="flex items-center gap-1.5 mt-1">
                 <StatusDot status={selectedCard.device.status} />
                 <span className="text-xs text-gray-500 capitalize">{selectedCard.device.status}</span>
@@ -1004,7 +1005,7 @@ export default function MetricsPage() {
                     </div>
                     <div>
                       <p className="text-xs text-gray-500 mb-0.5">IP</p>
-                      <p className="text-sm font-mono text-gray-300">{selectedCard.device.ip}</p>
+                      <p className="text-sm font-mono text-gray-300"><IpLink ip={selectedCard.device.ip} /></p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-500 mb-0.5">Status</p>

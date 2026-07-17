@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, getToken, HierarchyOrg } from '../api/client'
 import HelpButton from '../components/HelpButton'
+import IpLink from '../components/IpLink'
 
 interface Collector {
   id: number; name: string; description: string; ip: string | null
@@ -596,7 +597,7 @@ export default function Devices() {
                       </p>
                     )}
                   </td>
-                  <td className="px-5 py-3 font-mono text-gray-300 text-xs hidden sm:table-cell">{d.ip}</td>
+                  <td className="px-5 py-3 font-mono text-gray-300 text-xs hidden sm:table-cell"><IpLink ip={d.ip} /></td>
                   <td className="px-5 py-3 text-gray-400 text-xs hidden md:table-cell">
                     {d.collector_name ?? `#${d.collector_id}`}
                   </td>
