@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, getToken } from '../api/client'
+import HelpButton from '../components/HelpButton'
 
 interface OidEntry {
   id: number; oid: string; name: string; description: string
@@ -173,7 +174,14 @@ export default function OidCatalog() {
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <h1 className="text-lg font-semibold text-white">OID Catalog</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg font-semibold text-white">OID Catalog</h1>
+            <HelpButton title="OID Catalog — How It Works">
+              <p>This is the list of OIDs the poll engine and collectors know how to fetch and interpret — not a live view of any specific device's values. <span className="text-gray-300 font-medium">Bundled</span> entries ship with the app and are read-only; anything you add yourself is editable and deletable.</p>
+              <p><span className="text-gray-300 font-medium">Data type</span> tells the app how to parse the raw SNMP response: <code className="text-gray-400">gauge</code> (a point-in-time value), <code className="text-gray-400">counter</code> (monotonically increasing — rates are computed from deltas), <code className="text-gray-400">string</code>, <code className="text-gray-400">timeticks</code>, or <code className="text-gray-400">ipaddress</code>. Picking the wrong type won't error, but will make the resulting chart or value meaningless.</p>
+              <p>CSV import/export and the template are for bulk-adding custom OIDs — useful when standardizing a vendor's full MIB set instead of one entry at a time.</p>
+            </HelpButton>
+          </div>
           <p className="text-xs text-gray-500 mt-0.5">OIDs polled from devices. Bundled entries are read-only; add custom OIDs for your environment.</p>
         </div>
         <div className="flex items-center gap-2">
