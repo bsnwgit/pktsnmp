@@ -2,6 +2,7 @@ import { Component, useEffect, useRef, useState } from 'react'
 import { api, getToken, User, UserIn, SslStatus, HierarchyOrg, HierarchyGroup, HierarchySite, HierarchyLocation } from '../api/client'
 import { useAutoRefresh } from '../store/autoRefresh'
 import { useAuth } from '../store/auth'
+import HelpButton from '../components/HelpButton'
 
 // ── Error boundary ────────────────────────────────────────────────────────────
 class TabErrorBoundary extends Component<{ children: React.ReactNode }, { err: Error | null }> {
@@ -132,9 +133,10 @@ function RestartServiceRow() {
 
 // ── Section wrapper with Save ─────────────────────────────────────────────────
 function Section({
-  title, children, onSave, saving, saved, error,
+  title, help, children, onSave, saving, saved, error,
 }: {
   title: string
+  help?: { title: string; content: React.ReactNode }
   children: React.ReactNode
   onSave: () => Promise<void>
   saving: boolean
@@ -143,8 +145,9 @@ function Section({
 }) {
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-      <div className="px-6 py-4 border-b border-gray-800">
+      <div className="px-6 py-4 border-b border-gray-800 flex items-center gap-2">
         <h2 className="text-sm font-semibold text-white">{title}</h2>
+        {help && <HelpButton title={help.title}>{help.content}</HelpButton>}
       </div>
       <div className="px-6 py-2">
         {children}
@@ -672,7 +675,15 @@ export default function Settings() {
 
       {/* General */}
       {tab === 'general' && (
-        <Section title="General" onSave={generalSave.save} saving={generalSave.saving} saved={generalSave.saved} error={generalSave.error}>
+        <Section title="General" onSave={generalSave.save} saving={generalSave.saving} saved={generalSave.saved} error={generalSave.error}
+          help={{
+            title: 'General — How It Works',
+            content: <>
+              <p><span className="text-gray-300 font-medium">Base URL</span> feeds the SAML ACS/metadata URLs on the Auth tab and any links posted in Slack/Email/webhook notifications — set it to the actual externally-reachable address before configuring SSO or notifications, or those will point at the wrong place.</p>
+              <p><span className="text-gray-300 font-medium">AI Assistant</span> needs its own Anthropic API key (console.anthropic.com, separate from a Claude Enterprise seat) before the in-app chat panel does anything. Haiku is the default: fastest/cheapest for device and metric questions.</p>
+            </>,
+          }}
+        >
           <Field label="App name" hint="Displayed in browser tab and header">
             <TextInput value={str('app_name', 'pktSNMP')} onChange={v => set('app_name', v)} />
           </Field>
@@ -716,7 +727,16 @@ export default function Settings() {
 
       {/* SNMP */}
       {tab === 'snmp' && (
-        <Section title="SNMP" onSave={snmpSave.save} saving={snmpSave.saving} saved={snmpSave.saved} error={snmpSave.error}>
+        <Section title="SNMP" onSave={snmpSave.save} saving={snmpSave.saving} saved={snmpSave.saved} error={snmpSave.error}
+          help={{
+            title: 'SNMP — How It Works',
+            content: <>
+              <p>This tab only controls two things running <span className="text-gray-300 font-medium">on this server</span>: the trap receiver and the built-in local polling engine. <span className="text-gray-300 font-medium">Remote otelcol collectors are managed separately</span> under the Collectors nav item — they poll independently and aren't affected by anything here.</p>
+              <p><span className="text-gray-300 font-medium">Trap port 162</span> is the SNMP standard but needs root or <code className="text-gray-400">cap_net_bind_service</code> to bind — if the trap receiver won't start after enabling it, that's almost always why.</p>
+              <p>Both settings on this tab <span className="text-amber-500 font-medium">require a service restart</span> to take effect — toggling or changing the interval here doesn't live-reconfigure the running poller.</p>
+            </>,
+          }}
+        >
           <div className="pt-2 pb-1">
             <p className="text-xs font-semibold text-white uppercase tracking-wider">Trap Receiver</p>
           </div>
@@ -758,7 +778,16 @@ export default function Settings() {
 
       {/* Storage */}
       {tab === 'storage' && (
-        <Section title="Storage" onSave={storageSave.save} saving={storageSave.saving} saved={storageSave.saved} error={storageSave.error}>
+        <Section title="Storage" onSave={storageSave.save} saving={storageSave.saving} saved={storageSave.saved} error={storageSave.error}
+          help={{
+            title: 'Storage — How It Works',
+            content: <>
+              <p>Switching <span className="text-gray-300 font-medium">Backend</span> requires a service restart to actually take effect — the running process picks its storage driver once at startup, so saving this field alone won't move any data.</p>
+              <p><span className="text-gray-300 font-medium">SQLite is genuinely the default</span> for this app, unlike ClickHouse/DuckDB which exist for larger analytical workloads — most device counts never need to change this.</p>
+              <p>Retention days apply per-tier — raw SNMP records are usually kept far shorter than hourly rollups. <span className="text-gray-300 font-medium">Manual cleanup</span> applies current thresholds immediately instead of waiting for the next scheduled pass.</p>
+            </>,
+          }}
+        >
           <Field label="Backend" hint="SQLite is the default — stable, zero-config, sufficient for all device counts. DuckDB and ClickHouse are available for advanced analytics. A service restart is required after changing this setting.">
             <SelectInput
               value={str('storage_backend', 'sqlite')}
@@ -820,7 +849,16 @@ export default function Settings() {
 
       {/* Backup */}
       {tab === 'backup' && (
-        <Section title="Backup" onSave={backupSave.save} saving={backupSave.saving} saved={backupSave.saved} error={backupSave.error}>
+        <Section title="Backup" onSave={backupSave.save} saving={backupSave.saving} saved={backupSave.saved} error={backupSave.error}
+          help={{
+            title: 'Backup — How It Works',
+            content: <>
+              <p>A backup always includes the SQLite database (settings, devices, credentials, users, alert rules, hierarchy) and <code className="text-gray-400">config.yaml</code>. <span className="text-gray-300 font-medium">Include ClickHouse data</span> additionally exports SNMP data history — worth disabling if you only care about configuration, since data history is usually the largest part.</p>
+              <p><span className="text-gray-300 font-medium">Rotation count</span> caps how many snapshots (scheduled or manual) stay on disk — the oldest is deleted automatically once you exceed it.</p>
+              <p><span className="text-gray-300 font-medium">Export bundle</span> is a one-off download, separate from the rotation-managed snapshots above. <span className="text-amber-500 font-medium">Restore always requires a service restart</span> afterward for config changes in the bundle to apply.</p>
+            </>,
+          }}
+        >
           <Field label="Auto backup" hint="Run a scheduled backup on the server at the configured interval">
             <Toggle value={bool('backup_enabled')} onChange={v => set('backup_enabled', v)} />
           </Field>
@@ -921,7 +959,16 @@ export default function Settings() {
 
       {/* Auth */}
       {tab === 'auth' && (
-        <Section title="Authentication" onSave={authSave.save} saving={authSave.saving} saved={authSave.saved} error={authSave.error}>
+        <Section title="Authentication" onSave={authSave.save} saving={authSave.saving} saved={authSave.saved} error={authSave.error}
+          help={{
+            title: 'Authentication — How It Works',
+            content: <>
+              <p><span className="text-gray-300 font-medium">Local auth</span> and <span className="text-gray-300 font-medium">SAML SSO</span> aren't mutually exclusive — both can be on at once. Turning Local auth off forces everyone through SSO.</p>
+              <p>SAML users are <span className="text-gray-300 font-medium">auto-provisioned</span> on first successful login — no separate "create user" step.</p>
+              <p>Setting this up: paste Okta's IdP metadata XML to auto-fill the IdP fields, then register the <span className="text-gray-300 font-medium">ACS URL</span> shown here as the Single Sign-On URL in your Okta app. Both the ACS URL and SP metadata link derive from <span className="text-gray-300 font-medium">Base URL</span> on the General tab — set that correctly first.</p>
+            </>,
+          }}
+        >
           <Field label="Local auth" hint="Username/password login using local accounts">
             <Toggle value={bool('auth_local_enabled', true)} onChange={v => set('auth_local_enabled', v)} />
           </Field>
@@ -985,7 +1032,16 @@ export default function Settings() {
 
       {/* Notifications */}
       {tab === 'notifications' && (
-        <Section title="Notifications" onSave={notifySave.save} saving={notifySave.saving} saved={notifySave.saved} error={notifySave.error}>
+        <Section title="Notifications" onSave={notifySave.save} saving={notifySave.saving} saved={notifySave.saved} error={notifySave.error}
+          help={{
+            title: 'Notifications — How It Works',
+            content: <>
+              <p>These five channels — Slack, Email, PagerDuty, generic Webhook, and TraceCat SOAR — are what an <span className="text-gray-300 font-medium">Alert rule</span> (Alerts page) actually dispatches to when it fires. Enabling a channel here doesn't send anything by itself; it makes the channel available to alert rules.</p>
+              <p><span className="text-gray-300 font-medium">Send Test</span> is a real dispatch, not a dry run — it posts to Slack, sends actual SMTP, fires a PagerDuty event, etc., using whatever's currently filled in above even if unsaved.</p>
+              <p><span className="text-gray-300 font-medium">Webhook payload template</span> is Jinja2 — reference <code className="text-gray-400">alert_name</code>, <code className="text-gray-400">message</code>, <code className="text-gray-400">severity</code>, and <code className="text-gray-400">fired_at</code>.</p>
+            </>,
+          }}
+        >
           {/* Slack */}
           <div className="pt-2 pb-1">
             <p className="text-xs font-semibold text-white uppercase tracking-wider">Slack</p>
@@ -1100,7 +1156,16 @@ export default function Settings() {
 
       {/* Integrations */}
       {tab === 'integrations' && (
-        <Section title="Integrations" onSave={integrationsSave.save} saving={integrationsSave.saving} saved={integrationsSave.saved} error={integrationsSave.error}>
+        <Section title="Integrations" onSave={integrationsSave.save} saving={integrationsSave.saving} saved={integrationsSave.saved} error={integrationsSave.error}
+          help={{
+            title: 'Integrations — How It Works',
+            content: <>
+              <p><span className="text-gray-300 font-medium">Lucidchart</span> token enables exporting diagrams (topology/hierarchy views) straight into a new Lucidchart document via their API.</p>
+              <p><span className="text-gray-300 font-medium">SSL/TLS</span> accepts either a combined PFX/P12 file or a separate PEM cert+key pair — the running service auto-detects and loads whichever was uploaded at startup.</p>
+              <p><span className="text-gray-300 font-medium">pktHub Integration</span> is one-directional discovery: copy the Suite Token here into pktHub's App Manager when registering this app, so pktHub can proxy into it with users already signed in. Regenerating the token immediately revokes the old one.</p>
+            </>,
+          }}
+        >
           <div className="pt-2 pb-1">
             <p className="text-xs font-semibold text-white uppercase tracking-wider">Lucidchart</p>
           </div>
@@ -1522,7 +1587,14 @@ function CredentialsTab() {
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <h2 className="text-sm font-semibold text-white">SNMP Credentials</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-semibold text-white">SNMP Credentials</h2>
+            <HelpButton title="SNMP Credentials — How It Works">
+              <p>A credential is a <span className="text-gray-300 font-medium">named, reusable auth set</span> (v1/v2c community string, or v3 user/auth/priv) — create it once here, then assign it to any number of devices in the Devices page instead of re-entering SNMP auth per device.</p>
+              <p>Deleting a credential that's still assigned to a device will break polling for that device — reassign it to a different credential first.</p>
+              <p><span className="text-gray-300 font-medium">v3</span> credentials carry actual auth/priv passphrases; only admins can reveal a saved credential's secret fields, matching how other secrets are gated elsewhere in the app.</p>
+            </HelpButton>
+          </div>
           <p className="text-xs text-gray-500 mt-0.5">Named credential sets referenced by devices — manage all auth here, assign to devices in the Devices tab</p>
         </div>
         <button onClick={() => setModal('new')}
@@ -1832,6 +1904,14 @@ function UsersTab() {
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <p className="text-sm font-semibold text-white">Users</p>
+        <HelpButton title="Users — How It Works">
+          <p>Three roles: <span className="text-gray-300 font-medium">admin</span> (full access, including this Users tab, Credentials, and Hierarchy), <span className="text-gray-300 font-medium">analyst</span> (read access plus export), and <span className="text-gray-300 font-medium">viewer</span> (read-only, no export).</p>
+          <p>This tab only manages <span className="text-gray-300 font-medium">local accounts</span> — SAML/Okta SSO users are auto-provisioned on first login and managed in Okta itself, not here.</p>
+          <p><span className="text-gray-300 font-medium">Deactivate</span> blocks login immediately without deleting the account or its history — prefer it over Delete for someone leaving temporarily, since Delete is permanent.</p>
+        </HelpButton>
+      </div>
       <div className="flex items-center gap-3 flex-wrap">
         <p className="text-xs text-gray-500">Local accounts only — Okta SSO users are managed in Okta</p>
         <div className="flex items-center gap-2 ml-auto">
@@ -2121,7 +2201,14 @@ function HierarchyTab() {
 
       {/* Description card */}
       <div className="bg-gray-900 border border-gray-800 rounded-xl px-6 py-4">
-        <h2 className="text-sm font-semibold text-white mb-1">Org / Group / Site / Location Hierarchy</h2>
+        <div className="flex items-center gap-2 mb-1">
+          <h2 className="text-sm font-semibold text-white">Org / Group / Site / Location Hierarchy</h2>
+          <HelpButton title="Hierarchy — How It Works">
+            <p>Four fixed levels — <span className="text-gray-300 font-medium">Org → Group → Site → Location</span> — that populate the cascading dropdowns used when placing a device (Devices page) and on the Dashboard's environment tree. There's no fifth level and no reordering; only the names at each level are yours to define.</p>
+            <p><span className="text-amber-500 font-medium">Deletes cascade with no separate confirmation per level</span> — removing an Org deletes every Group, Site, and Location beneath it in one action. If a device's saved placement no longer matches any entry here (renamed or deleted after the device was set up), the Devices edit form still shows the old value as a selectable option rather than silently dropping it.</p>
+            <p>Renaming a level in place (the pencil icon) doesn't require re-saving every device — it's the same row, just relabeled.</p>
+          </HelpButton>
+        </div>
         <p className="text-xs text-gray-400">
           Define the organization tree that appears as dropdowns in device configuration.
           Structure: <span className="text-white font-medium">Org → Group → Site → Location</span>.
