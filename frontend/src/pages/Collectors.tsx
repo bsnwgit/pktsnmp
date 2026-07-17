@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { getToken, api, IngestRateBucket } from '../api/client'
 import HelpButton from '../components/HelpButton'
+import { copyToClipboard } from '../utils/clipboard'
 import IpLink from '../components/IpLink'
 
 interface CollectorImportResult {
@@ -362,7 +363,7 @@ function PreviewModal({ collectorId, collectorName, onClose }: {
           <h2 className="text-sm font-semibold text-white">Config Preview — {collectorName}</h2>
           <div className="flex items-center gap-3">
             {yaml && (
-              <button onClick={() => navigator.clipboard.writeText(yaml)}
+              <button onClick={() => copyToClipboard(yaml)}
                 className="text-xs text-gray-400 hover:text-white">Copy</button>
             )}
             <button onClick={onClose} className="text-gray-500 hover:text-gray-300 text-lg leading-none">✕</button>
@@ -560,7 +561,7 @@ export default function Collectors() {
           <div className="flex items-center gap-2">
             <input readOnly value={newToken.token}
               className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-xs text-white font-mono" />
-            <button onClick={() => navigator.clipboard.writeText(newToken.token)}
+            <button onClick={() => copyToClipboard(newToken.token)}
               className="px-3 py-2 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors">Copy</button>
           </div>
           <button onClick={() => setNewToken(null)} className="text-xs text-gray-500 hover:text-gray-300">Dismiss</button>
@@ -786,7 +787,7 @@ export default function Collectors() {
                       <span className="text-xs text-gray-300 w-28 truncate flex-shrink-0" title={t.name}>{t.name}</span>
                       <input readOnly value={t.api_token}
                         className="flex-1 min-w-0 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-white font-mono" />
-                      <button onClick={() => navigator.clipboard.writeText(t.api_token)}
+                      <button onClick={() => copyToClipboard(t.api_token)}
                         className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded flex-shrink-0">Copy</button>
                     </div>
                   ))}
