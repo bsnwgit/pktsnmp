@@ -26,6 +26,8 @@ from app.api import (
 )
 from app.api import suite as suite_router
 from app.api import logs as logs_router
+from app.api import user_api_keys as user_api_keys_router
+from app.api import ip_info as ip_info_router
 
 settings = get_settings()
 log = logging.getLogger("pktsnmp")
@@ -135,6 +137,8 @@ app.include_router(system_router.router,   prefix="/api/system",   tags=["system
 app.include_router(alerts_router.router,   prefix="/api/alerts",   tags=["alerts"])
 app.include_router(logs_router.router,     prefix="/api/logs",     tags=["logs"])
 app.include_router(suite_router.router, prefix="/api/suite", tags=["suite"])
+app.include_router(user_api_keys_router.router, prefix="/api/user-api-keys", tags=["user-api-keys"])
+app.include_router(ip_info_router.router,       prefix="/api/ip-info",       tags=["ip-info"])
 
 # ── Health check ──────────────────────────────────────────────────────────────
 
