@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { getToken, api, IngestRateBucket } from '../api/client'
+import HelpButton from '../components/HelpButton'
 
 interface CollectorImportResult {
   created: number
@@ -516,7 +517,14 @@ export default function Collectors() {
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <h1 className="text-lg font-semibold text-white">Collectors</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg font-semibold text-white">Collectors</h1>
+            <HelpButton title="Collectors — How It Works">
+              <p>The built-in local collector (always id 1) runs in-process, toggled from Settings → SNMP — it has no SSH/Sync/Preview actions here since there's nothing remote to configure or push to.</p>
+              <p>Every other row is a <span className="text-gray-300 font-medium">remote otelcol collector</span>: <span className="text-gray-300 font-medium">Sync</span> pushes this app's current device/credential config out to that collector over SSH, <span className="text-gray-300 font-medium">Preview config</span> shows what would be generated without pushing it, and <span className="text-gray-300 font-medium">Test SSH</span> checks connectivity alone. These actions are admin-only; all users can view status and last-sync state.</p>
+              <p>Landing here with a highlighted row means you followed an Investigate link from a <code className="text-gray-400">collector_gap</code> alert — that's this specific collector that stopped sending data.</p>
+            </HelpButton>
+          </div>
           <p className="text-xs text-gray-500 mt-0.5">Manage remote otelcol collectors and the built-in local collector</p>
         </div>
         <div className="flex items-center gap-2">
