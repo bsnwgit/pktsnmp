@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { getToken, api, IngestRateBucket } from '../api/client'
 import HelpButton from '../components/HelpButton'
+import IpLink from '../components/IpLink'
 
 interface CollectorImportResult {
   created: number
@@ -674,7 +675,7 @@ export default function Collectors() {
                         <span className="text-xs text-amber-600 bg-amber-900/20 px-1.5 py-0.5 rounded">no SSH creds</span>}
                     </div>
                   </td>
-                  <td className="px-5 py-3 font-mono text-gray-300 text-xs hidden sm:table-cell">{c.ip ?? '—'}</td>
+                  <td className="px-5 py-3 font-mono text-gray-300 text-xs hidden sm:table-cell">{c.ip ? <IpLink ip={c.ip} /> : '—'}</td>
                   <td className="px-5 py-3">
                     <div className="text-xs">
                       <span className="flex items-center gap-1.5">
