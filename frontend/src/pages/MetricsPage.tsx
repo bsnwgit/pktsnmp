@@ -21,6 +21,7 @@ import {
   DeviceMetricsCard, DeviceInterface, MetricsHistoryResponse, MetricPoint, MetricSnapshot,
   OID_META, TimeRange,
 } from '../api/client'
+import HelpButton from '../components/HelpButton'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -755,6 +756,11 @@ export default function MetricsPage() {
             <button onClick={goOverview} className="text-blue-400 hover:text-blue-300 font-medium">
               Metrics
             </button>
+            <HelpButton title="Metrics — How It Works">
+              <p>Three layers: <span className="text-gray-300 font-medium">Overview</span> (every device as a card, even ones with no data yet — dimmed rather than hidden), <span className="text-gray-300 font-medium">Device</span> (detail view with an interface sidebar plus system-resource metric sections), and <span className="text-gray-300 font-medium">Interface</span> (per-port IF-MIB charts for one interface).</p>
+              <p>Metric sections always render even when empty — a blank chart means no data collected for that OID in the selected window, not a bug.</p>
+              <p><span className="text-gray-300 font-medium">Hiding an interface</span> is per-device and per-browser (stored in <code className="text-gray-400">localStorage</code>, not synced across users or devices you're viewing from) — useful for filtering out uplinks or unused ports without affecting what anyone else sees.</p>
+            </HelpButton>
             {selectedCard && <>
               <span className="text-gray-600">/</span>
               <select
