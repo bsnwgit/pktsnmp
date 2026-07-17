@@ -24,7 +24,7 @@ SNMP ingest management and visualization platform — part of the pkt suite. Rec
 - [Device Hierarchy](#device-hierarchy)
 - [Database Backends](#database-backends)
 - [Backup & Restore](#backup--restore)
-- [pktHub Integration](#pkthub-integration)
+- [Suite Integration](#suite-integration)
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
 
@@ -686,9 +686,9 @@ To add a new migration: create `migrations/NNN_your_change.sql` and restart the 
 
 ---
 
-## pktHub Integration
+## Suite Integration
 
-pktSNMP integrates with pktHub (the suite management hub) via a suite token. Once registered, pktHub proxies access to pktSNMP and manages authentication for all managed pktAPP apps.
+pktSNMP integrates with the rest of the pkt suite via a suite token — identical mechanism regardless of which pkt app is on the other end. Today that's pktHub (the suite management hub), which proxies access and manages authentication for every registered pktAPP app once pktSNMP is registered with it.
 
 ### Suite token endpoints
 
@@ -700,7 +700,7 @@ pktSNMP integrates with pktHub (the suite management hub) via a suite token. Onc
 
 ### Registration steps
 
-1. In pktSNMP, go to **Settings → Integrations → pktHub Integration** and click **Copy Token**
+1. In pktSNMP, go to **Settings → Integrations → Suite Integration** and click **Copy Token**
 2. In pktHub, go to **Settings → App Registry → Register App**
 3. Paste the suite token, enter the pktSNMP base URL, and click **Register**
 4. pktHub validates via `/api/health` and stores the token
