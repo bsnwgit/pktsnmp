@@ -6,6 +6,7 @@ import {
 } from '../api/client'
 import { useAutoRefresh } from '../store/autoRefresh'
 import DeviceMetricsPanel from '../components/DeviceMetricsPanel'
+import HelpButton from '../components/HelpButton'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -545,7 +546,13 @@ export default function Dashboard() {
 
       <div className="space-y-5">
         <div className="flex items-center justify-between">
-          <h1 className="text-xl font-bold text-white">Dashboard</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold text-white">Dashboard</h1>
+            <HelpButton title="Dashboard — How It Works">
+              <p>The stat cards are clickable shortcuts into Devices/Alerts, filtered to that count.</p>
+              <p>The tree below mirrors the <span className="text-gray-300 font-medium">Org → Group → Site → Location</span> hierarchy defined in Settings → Hierarchy — clicking a device opens a metrics panel in place rather than navigating away, so you can keep browsing the tree.</p>
+            </HelpButton>
+          </div>
           <p className="text-xs text-gray-600">Auto-refreshes every 30s</p>
         </div>
 

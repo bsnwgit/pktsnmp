@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, getToken, HierarchyOrg } from '../api/client'
+import HelpButton from '../components/HelpButton'
 
 interface Collector {
   id: number; name: string; description: string; ip: string | null
@@ -500,7 +501,14 @@ export default function Devices() {
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <h1 className="text-lg font-semibold text-white">Devices</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg font-semibold text-white">Devices</h1>
+            <HelpButton title="Devices — How It Works">
+              <p>Every device needs a <span className="text-gray-300 font-medium">Collector</span> (which one actually polls it — local or a remote otelcol) and a <span className="text-gray-300 font-medium">Credential</span> (SNMP v1/v2c/v3 auth, defined once in Settings → Credentials and reused across devices).</p>
+              <p>Org/Group/Site/Location placement comes from Settings → Hierarchy's cascading dropdowns — if a device's saved placement no longer matches any current hierarchy entry, the edit form still shows the old value as a selectable option rather than dropping it silently.</p>
+              <p>CSV import/export and the downloadable template are for bulk provisioning — useful when onboarding many devices at once instead of one by one.</p>
+            </HelpButton>
+          </div>
           <p className="text-xs text-gray-500 mt-0.5">{devices.length} device{devices.length !== 1 ? 's' : ''} registered</p>
         </div>
         <div className="flex items-center gap-2">
