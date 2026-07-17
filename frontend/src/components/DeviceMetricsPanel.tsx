@@ -16,6 +16,7 @@ import {
 import {
   api, DeviceTreeNode, MetricLatestItem, MetricPoint, OID_META,
 } from '../api/client'
+import IpLink from './IpLink'
 
 // ── Rate computation ──────────────────────────────────────────────────────────
 
@@ -222,7 +223,7 @@ export default function DeviceMetricsPanel({ device, onClose }: Props) {
         </span>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-white truncate">{device.name}</p>
-          <p className="text-xs text-gray-500 font-mono">{device.ip}</p>
+          <p className="text-xs text-gray-500 font-mono"><IpLink ip={device.ip} /></p>
         </div>
         <button
           onClick={onClose}
