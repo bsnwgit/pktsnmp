@@ -375,6 +375,28 @@ export const api = {
     request<{ id: number; name: string }>(`/snmp/hierarchy/locations/${id}`, { method: 'PUT', body: JSON.stringify({ name }) }),
   deleteHierarchyLocation: (id: number) =>
     request<void>(`/snmp/hierarchy/locations/${id}`, { method: 'DELETE' }),
+
+  getUserApiKeys: () => request<UserApiKey[]>('/user-api-keys'),
+  setUserApiKey: (provider: string, api_key: string) =>
+    request<UserApiKey>(`/user-api-keys/${provider}`, { method: 'PUT', body: JSON.stringify({ api_key }) }),
+  testUserApiKey: (provider: string, api_key: string) =>
+    request<{ status: string; detail: string }>(`/user-api-keys/${provider}/test`, { method: 'POST', body: JSON.stringify({ api_key }) }),
+  getIpInfo: (ip: string) => request<IpInfoResult>(`/ip-info/${ip}`),
+}
+
+export interface IpInfoResult {
+  ip: string
+  ipinfo: Record<string, any> | null
+  ipinfo_error: string | null
+  abuseipdb: Record<string, any> | null
+  abuseipdb_error: string | null
+}
+
+export interface UserApiKey {
+  provider: string
+  label: string
+  api_key: string
+  updated_at: string | null
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
