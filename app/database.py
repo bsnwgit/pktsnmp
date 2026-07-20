@@ -96,7 +96,7 @@ async def seed_admin() -> None:
         from app.auth.local import hash_password
         hashed = hash_password(admin_password)
         await conn.execute(
-            "INSERT INTO users (username, email, hashed_password, role) VALUES (?, ?, ?, ?)",
+            "INSERT INTO users (username, email, hashed_password, role, is_default_admin) VALUES (?, ?, ?, ?, 1)",
             ("admin", "admin@pktsnmp.local", hashed, "admin"),
         )
         await conn.commit()
