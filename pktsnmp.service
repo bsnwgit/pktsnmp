@@ -1,6 +1,10 @@
 # Template — install.sh substitutes __INSTALL_DIR__ / __LOG_DIR__ /
 # __SERVICE_USER__ / __SERVICE_GROUP__ before installing to systemd.
 # For a manual install, replace these placeholders yourself.
+#
+# Host/port are NOT set here — app/server.py reads them from config.yaml at
+# each process start, so Settings → General → Port only needs config.yaml
+# rewritten + a restart, not a unit file edit.
 [Unit]
 Description=pktSNMP SNMP Ingest Management & Visualization Platform
 Documentation=https://github.com/bsnwgit/pktsnmp
@@ -15,12 +19,7 @@ WorkingDirectory=__INSTALL_DIR__
 Environment=PKTSNMP_CONFIG=__INSTALL_DIR__/config.yaml
 Environment=PKTSNMP_INSTALL_DIR=__INSTALL_DIR__
 
-ExecStart=__INSTALL_DIR__/venv/bin/uvicorn app.main:app \
-    --host 0.0.0.0 \
-    --port 8767 \
-    --workers 1 \
-    --log-level info \
-    --no-access-log
+ExecStart=__INSTALL_DIR__/venv/bin/python -m app.server
 
 Restart=on-failure
 RestartSec=5

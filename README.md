@@ -18,15 +18,18 @@ SNMP ingest management and visualization platform — part of the pkt suite. Rec
 - [Running & Managing the Service](#running--managing-the-service)
 - [Upgrading](#upgrading)
 - [Roles & Auth](#roles--auth)
+- [Settings Layout](#settings-layout)
 - [SNMP Settings](#snmp-settings)
 - [SSL/TLS](#ssltls)
 - [Alert Engine](#alert-engine)
 - [Device Hierarchy](#device-hierarchy)
 - [Database Backends](#database-backends)
 - [Backup & Restore](#backup--restore)
-- [Suite Integration](#suite-integration)
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
+- [Contextual Help & IP Intelligence](#contextual-help--ip-intelligence)
+- [Suite Integration](#suite-integration)
+- [Related projects](#related-projects)
 
 ---
 
@@ -37,10 +40,10 @@ SNMP ingest management and visualization platform — part of the pkt suite. Rec
 git clone git@github.com:bsnwgit/pktsnmp.git
 cd pktsnmp
 
-# 2. Run the installer — prompts for an install directory (default /opt/pktsnmp),
-#    then handles system packages, Python venv, config.yaml + secret key, DB
-#    migrations, admin user, frontend build (if npm is present), and the
-#    systemd service (installed + started)
+# 2. Run the installer — prompts for an install directory (default /opt/pktsnmp)
+#    and a port (default 8767), then handles system packages, Python venv,
+#    config.yaml + secret key, DB migrations, admin user, frontend build (if
+#    npm is present), and the systemd service (installed + started)
 bash install.sh
 
 # Prints the admin password at the end — save it, it is not shown again.
@@ -59,9 +62,12 @@ sudo ufw allow 162/udp   # only if using the built-in SNMP trap receiver
 | Variable | Default | Description |
 |---|---|---|
 | `PKTSNMP_INSTALL_DIR` | `/opt/pktsnmp` | Where the app, venv, and config are installed |
+| `PKTSNMP_PORT` | `8767` | HTTP port — written into `config.yaml` and the CORS/base-URL defaults |
 | `PKTSNMP_LOG_DIR` | `$PKTSNMP_INSTALL_DIR/logs` | Log file directory |
 | `PKTSNMP_SERVICE_USER` | current user | User the systemd service runs as |
 | `PKTSNMP_SERVICE_GROUP` | `$PKTSNMP_SERVICE_USER` | Group the systemd service runs as |
+
+Setting `PKTSNMP_INSTALL_DIR` and/or `PKTSNMP_PORT` skips the corresponding interactive prompt — useful for unattended installs.
 
 ---
 
@@ -82,7 +88,7 @@ sudo ufw allow 162/udp   # only if using the built-in SNMP trap receiver
 │                                  collectors, alert rules,     │
 │                                  alert events, notif log      │
 │   SQLite  snmp_timeseries.db  ← snmp_traps, snmp_poll_results│
-│   (or DuckDB / ClickHouse — switchable in Settings → Storage) │
+│   (or DuckDB / ClickHouse — switchable in Settings → Data → Storage) │
 │                                                              │
 │   React SPA  frontend/dist/                                  │
 │   served by uvicorn StaticFiles                              │
@@ -143,7 +149,7 @@ cd pktsnmp
 bash install.sh
 ```
 
-Prompts for an install directory (default `/opt/pktsnmp`) if run interactively; set `PKTSNMP_INSTALL_DIR` to skip the prompt (see [Environment variables](#environment-variables)). Performs, in order:
+Prompts for an install directory (default `/opt/pktsnmp`) and a port (default `8767`) if run interactively; set `PKTSNMP_INSTALL_DIR` / `PKTSNMP_PORT` to skip either prompt (see [Environment variables](#environment-variables)). Performs, in order:
 
 1. Installs system packages (Python, build tools, `libssl-dev`/`libffi-dev`, `libxmlsec1`/`libxml2` for SAML)
 2. Creates the install directory and log directory
@@ -168,7 +174,7 @@ sudo systemctl status pktsnmp
 curl -s http://localhost:8767/api/health
 ```
 
-Navigate to `http://<server-ip>:8767` and log in with the admin credentials printed by the installer. **Change the password immediately** in Settings → Users.
+Navigate to `http://<server-ip>:8767` and log in with the admin credentials printed by the installer. **Change the password immediately** in Settings → Security → Users.
 
 ### Re-running the installer
 
@@ -252,7 +258,7 @@ Runs in-process on the pktSNMP host. Polls all devices assigned to `collector_id
 
 Existing OpenTelemetry Collector instances push OTLP HTTP JSON to pktSNMP.
 
-Multiple otelcol instances can be registered, each with a unique bearer token — generated and rotated in **Settings → Collectors**. See `docs/collector-setup.md` for the full redirect/registration walkthrough.
+Multiple otelcol instances can be registered, each with a unique bearer token — generated and rotated on the **Collectors** page (top-level nav, not under Settings). See `docs/collector-setup.md` for the full redirect/registration walkthrough.
 
 **Bulk import/export:** the Collectors and OID Catalog pages both have "Export CSV" / "Import CSV" / template-download buttons, for provisioning many collectors or a large OID set (a vendor MIB dump, a shared team catalog) at once instead of one at a time. Collector CSV import never accepts API tokens by value — each imported row gets its own freshly generated token, shown once in the import-result dialog, same as adding a single collector. Duplicate rows (by collector name / OID string) are skipped with a per-row message, not overwritten.
 
@@ -330,12 +336,12 @@ All startup/infrastructure settings live in `config.yaml`. Runtime settings (sto
 | `snmp_trap_enabled` | Enable trap receiver |
 | `snmp_trap_port` | Trap UDP port (default 162) |
 | `snmp_poll_enabled` | Enable local poll engine |
-| `snmp_poll_interval_seconds` | Default poll interval |
-| `snmp_version` | `v1` / `v2c` / `v3` |
-| `snmp_community` | Community string (v1/v2c) |
-| `snmp_v3_auth_key` | SNMPv3 auth key (stored masked) |
-| `snmp_v3_priv_key` | SNMPv3 privacy key (stored masked) |
-| `storage_backend` | `"sqlite"` (default) / `"duckdb"` / `"clickhouse"` |
+| `snmp_poll_interval_seconds` | The "Poll interval" field on Settings → SNMP — see caveat below |
+| `storage_backend` | `"sqlite"` (default) / `"duckdb"` / `"clickhouse"` — see [Database Backends](#database-backends), ClickHouse is not yet usable |
+
+> **Known bug — poll interval setting is disconnected from the poll engine.** The Settings → SNMP UI reads/writes `snmp_poll_interval_seconds` (default `300`), but `app/snmp/poll_engine.py` actually reads a *different* key, `snmp_poll_default_interval_seconds` (default `60`), which the UI never writes to. In practice, changing "Poll interval" in Settings has no effect on the running poll cadence — it stays at 60s unless `snmp_poll_default_interval_seconds` is edited directly in SQLite. There's also an unexposed `snmp_poll_max_concurrency` setting (default `10`) with no UI control at all. This needs a code fix (rename one key to match the other, or have the poll engine read the same key the UI writes) — flagged here since it's a real functional gap, not just a naming inconsistency.
+
+`snmp_version` / `snmp_community` / `snmp_v3_auth_key` / `snmp_v3_priv_key` still exist as legacy global settings keys in the schema, but nothing in the current trap receiver, poll engine, or otelcol-config code paths reads them anymore — SNMP credentials are resolved per-device or per-named-credential (see [SNMP Credential Library](#snmp-credential-library)) with hardcoded fallbacks (`v2c` / `public` / `noAuthNoPriv`), not from these settings. The Settings → SNMP tab no longer exposes them in the UI. Treat them as dead/vestigial rather than configuring against them.
 
 ---
 
@@ -387,11 +393,11 @@ Three roles: `admin`, `analyst`, `viewer`.
 
 ### Local auth
 
-The default admin user is created by `install.sh` (or `seed_admin()` in a manual install). Password is changed via Settings → Users or the key icon in the sidebar.
+The default admin user is created by `install.sh` (or `seed_admin()` in a manual install). Password is changed via Settings → Security → Users or the key icon in the sidebar. The login form accepts Enter to submit from either the username or password field.
 
 ### Okta SAML 2.0
 
-Configure in **Settings → Auth**:
+Configure in **Settings → Security → Auth**:
 1. Set the Okta Entity ID, SSO URL, and paste the IdP certificate
 2. In Okta, create a SAML app with:
    - **Single sign-on URL (ACS):** `https://YOUR-FQDN:8767/api/auth/saml/callback`
@@ -404,21 +410,55 @@ Configure in **Settings → Auth**:
 
 ---
 
+## Settings Layout
+
+The **Settings** page (admin-only nav item) is organized as top-level tabs, two of which have their own nested sub-tabs:
+
+| Tab | Sub-tab | Contents |
+|---|---|---|
+| **General** | — | App name, `base_url`, timezone |
+| **Security** | Users | User accounts, roles, password resets |
+| | Auth | Okta SAML 2.0 configuration |
+| | Suite Integration | Suite token, Copy Token, Regen, managed-mode status |
+| | AI Assistant | Anthropic API key for the AI Assistant panel |
+| | SSL / TLS | HTTPS enable/disable toggle, cert/key paths |
+| **Data** | Storage | Time-series storage backend (SQLite/DuckDB/ClickHouse) |
+| | Backups | Backup schedule, retention, manual trigger |
+| **Notifications** | — | Slack/Email/PagerDuty/Webhook channel configuration |
+| **User Keys** | — | Per-user external API keys (ipinfo.io, AbuseIPDB, IPQualityScore) — see [Contextual Help & IP Intelligence](#contextual-help--ip-intelligence) |
+| **SNMP** | — | Trap receiver, local poll engine, and the SNMP Credential Library (see below) |
+| **Hierarchy** | — | Org / Group / Site / Location tree management and renaming |
+
+**Devices** and **Collectors** are top-level nav items in their own right (alongside Dashboard, Metrics, Alerts, Logs, OID Catalog) — they are *not* under Settings, despite managing device/collector records that Settings features (credentials, hierarchy) reference.
+
+---
+
 ## SNMP Settings
 
-Configure via **Settings → SNMP** in the UI.
+Configure trap receiver and local poll engine via **Settings → SNMP** in the UI. This tab only controls what runs on this server — remote otelcol collectors are managed independently on the **Collectors** page and are unaffected by anything here.
 
 - **Trap receiver** — enable/disable, set UDP port (default 162). Restart service after changing port.
 - **Poll engine** — enable/disable, set default poll interval. Per-device intervals can override the default.
-- **SNMP version** — global default (v1 / v2c / v3). Override per device.
+- **SNMP version** — global default (v1 / v2c / v3). Override per device or per named credential (see below).
 - **Community string** — used for v1/v2c devices without a per-device override.
-- **SNMPv3 credentials** — auth key and priv key, stored masked at rest.
+
+Both settings require a service restart to take effect — toggling or changing the interval doesn't live-reconfigure the running poller.
+
+### SNMP Credential Library
+
+Rather than entering SNMP credentials inline per device, admins maintain a named library of reusable credentials on the same **Settings → SNMP** tab, below the trap/poll settings:
+
+- Each credential has a name, description, SNMP version (`v2c`/`v3`), community string (v2c), and for v3: security name, security level (`noAuthNoPriv`/`authNoPriv`/`authPriv`), auth protocol (default `SHA256`), auth key, priv protocol (default `AES128`), and priv key
+- Secrets (`community`, `auth_key`, `priv_key`) are stored masked at rest and never returned in full over the API
+- Devices reference a credential by `credential_id` (**Devices → Add/Edit Device → Credential**) instead of storing their own copy
+- A credential in use by one or more devices cannot be deleted — the API rejects the delete and the UI shows which devices are attached
+- Both the local poll engine and the built-in trap/SNMP GET paths resolve the device's assigned credential at poll/lookup time — there's no separate "sync" step
 
 ---
 
 ## SSL/TLS
 
-SSL can be enabled or disabled via **Settings → General → SSL/TLS Toggle** without restarting the service.
+SSL is enabled or disabled via **Settings → Security → SSL / TLS**. The toggle itself saves immediately, but — like every other setting on this tab — **requires a service restart to actually apply**; use the **Restart Service** button on the General tab, or `sudo systemctl restart pktsnmp`.
 
 | Setting key | Description |
 |---|---|
@@ -426,7 +466,7 @@ SSL can be enabled or disabled via **Settings → General → SSL/TLS Toggle** w
 | `ssl_certfile` | Absolute path to the TLS certificate file (PEM) |
 | `ssl_keyfile` | Absolute path to the TLS private key file (PEM) |
 
-When `ssl_enabled` is `true`, uvicorn binds with the provided cert/key and the service becomes HTTPS-only. When `false`, it binds plain HTTP. Change takes effect after a service restart (`sudo systemctl restart pktsnmp`).
+Certificates can be uploaded as separate PEM cert/key files or as a single PFX/PKCS12 bundle (with passphrase) directly from the SSL/TLS panel. When `ssl_enabled` is `true`, uvicorn binds with the provided cert/key and the service becomes HTTPS-only. When `false`, it binds plain HTTP.
 
 > **SAML note:** The Okta SAML ACS URL must match the scheme (`https://`) set by your TLS configuration. If you toggle SSL, update the ACS URL in Okta accordingly.
 
@@ -542,7 +582,7 @@ Use **Export CSV** / **Import CSV** on the Devices page to bulk-manage devices. 
 
 ## Database Backends
 
-Switch backends in **Settings → Storage**.
+Switch backends in **Settings → Data → Storage**.
 
 ### SQLite (default)
 
@@ -557,12 +597,12 @@ Switch backends in **Settings → Storage**.
 - Embedded, no separate service — single-file analytical database
 - Path configured via `duckdb_path` in `config.yaml`
 
-### ClickHouse
+### ClickHouse — not yet functional
 
-- Requires a running ClickHouse server (not installed by `install.sh`)
-- Database: `pktsnmp`, table: `snmp_data`
-- Set credentials in `config.yaml`
-- Better for very high-volume environments or long-term retention at scale
+- Requires a running ClickHouse server (not installed by `install.sh`), database `pktsnmp`, table `snmp_data`, credentials set in `config.yaml`
+- Intended for very high-volume environments or long-term retention at scale
+
+> **Do not select ClickHouse in Settings → Data → Storage.** The connection/health-check path works, but `app/storage/clickhouse.py` currently raises `NotImplementedError` on every actual ingest/query call (`ingest_trap`, `ingest_poll_result`, `query_traps`, `query_poll_history`). Selecting it will silently stop trap and poll ingestion until you switch back. This is a real gap, not a documentation gap — treat SQLite or DuckDB as the only two usable backends until ClickHouse support is finished.
 
 > **Note:** The storage backend is read from the `storage_backend` setting in SQLite at startup and cannot be changed while the service is running. Restart after switching.
 
@@ -580,7 +620,7 @@ python backup.py
 
 ### Automated backup
 
-Configure schedule and retention in **Settings → Backup**, or trigger immediately via the UI or:
+Configure schedule and retention in **Settings → Data → Backups**, or trigger immediately via the UI or:
 
 ```bash
 curl -X POST http://SERVER-IP:8767/api/system/backup -H "Authorization: Bearer TOKEN"
@@ -686,6 +726,23 @@ To add a new migration: create `migrations/NNN_your_change.sql` and restart the 
 
 ---
 
+## Contextual Help & IP Intelligence
+
+### App-wide contextual help
+
+Most pages (Dashboard, Metrics, Alerts, Logs, Collectors, Devices, OID Catalog, and every admin tab in Settings) have a **?** help button next to the page/section title. Clicking it opens an inline popover explaining what the page does and any non-obvious behavior (e.g. "changes here require a service restart"). This is static, bundled help content — no network call, no AI involved.
+
+### Per-user IP intelligence / reputation lookup
+
+Any IP address rendered in the app (device IPs, trap sources, log lines) is auto-linked — click it to open a lookup modal combining:
+
+- **ipinfo.io** — geolocation / ASN / org info
+- **AbuseIPDB** — abuse confidence score and report history
+
+Private, loopback, link-local, reserved, and multicast addresses are rejected client- and server-side (nothing useful to look up). Each user supplies their **own** API key for each provider under **Settings → User Keys** — there is no shared/admin-wide key, and no admin override of another user's keys. If a key is missing, the modal shows which provider is unconfigured with a direct link to Settings → User Keys. A third provider slot, **IPQualityScore**, exists in the key-management API but is not yet wired into the combined lookup modal.
+
+---
+
 ## Suite Integration
 
 pktSNMP integrates with the rest of the pkt suite via a suite token — identical mechanism regardless of which pkt app is on the other end. Today that's pktHub (the suite management hub), which proxies access and manages authentication for every registered pktAPP app once pktSNMP is registered with it.
@@ -700,7 +757,7 @@ pktSNMP integrates with the rest of the pkt suite via a suite token — identica
 
 ### Registration steps
 
-1. In pktSNMP, go to **Settings → Integrations → Suite Integration** and click **Copy Token**
+1. In pktSNMP, go to **Settings → Security → Suite Integration** and click **Copy Token**
 2. In pktHub, go to **Settings → App Registry → Register App**
 3. Paste the suite token, enter the pktSNMP base URL, and click **Register**
 4. pktHub validates via `/api/health` and stores the token
@@ -718,7 +775,7 @@ This removes the suite-token requirement, restores direct access, and logs the e
 
 ### Token rotation
 
-Use **Regen** in pktSNMP Settings → Integrations to generate a new token. After regenerating, re-register in pktHub (the old token is immediately invalidated).
+Use **Regen** in pktSNMP Settings → Security → Suite Integration to generate a new token. After regenerating, re-register in pktHub (the old token is immediately invalidated).
 
 ---
 
@@ -730,5 +787,7 @@ Use **Regen** in pktSNMP Settings → Integrations to generate a new token. Afte
 | pktFlow | — | NetFlow ingest and visualization (pktSNMP ancestor) |
 | pktLog | — | Syslog ingest and management |
 | pktPCAP | — | Packet capture and analysis |
+| pktIPAM | 8761 | Enterprise IPAM — DHCP/DNS/device reconciliation and conflict detection |
+| pktWiFi | 8769 | Wireless controller/AP monitoring |
 
 Logos for all pkt apps are served from the pktHub `/logos/` endpoint.
