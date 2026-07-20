@@ -2,89 +2,95 @@
 
 Status key: ⬜ not started · 🔄 in progress · ✅ complete
 
+Last reconciled against `git log` and the current codebase 2026-07-20. Phases 1–6 below
+(the original build-out plan) are now **complete** — see the changelog at the bottom for
+what actually shipped, since a lot of the original phase descriptions undersold or
+predated what's really there now (hierarchy went to 5 levels, alert rule types grew to
+12, per-interface metrics, a credential library, etc.). See `README.md` for full current
+feature documentation.
+
 ---
 
 ## Phase 1 — App Shell (complete)
 
-✅ FastAPI backend scaffold (main.py, auth, users, settings, system, backup, alerts stub)  
-✅ SNMP settings keys (trap port, poll interval, version, community, v3 credentials)  
-✅ Storage layer (DuckDB default, ClickHouse stub, factory)  
-✅ SQLite migrations (users, settings, devices, alert_rules, alert_events, notification_log)  
-✅ JWT + httpOnly refresh token auth  
-✅ Okta SAML 2.0 SSO  
-✅ Notification channels (Slack, Email, PagerDuty, Webhook, TraceCat)  
-✅ Backup scheduler + export/import bundle  
-✅ systemd service definition (pktsnmp.service)  
-✅ React + TypeScript + Tailwind + Vite frontend  
-✅ Settings page (General, SNMP, Storage, Backup, Auth, Notifications, Integrations, Users)  
-✅ Dashboard stub  
-✅ Alerts stub  
-✅ AI Assistant panel (Claude, gated on anthropic_api_key)  
-✅ install.sh (Ubuntu bare-metal installer)  
-✅ backup.py (local 2-rotation zip)  
+✅ FastAPI backend scaffold (main.py, auth, users, settings, system, backup, alerts)
+✅ SNMP settings keys (trap port, poll interval, version, community) + named SNMP Credential Library (v2c/v3, masked at rest, referenced by devices via `credential_id`)
+✅ Storage layer (SQLite default, DuckDB fully implemented, ClickHouse factory wiring present but **not implemented** — see Known Gaps)
+✅ SQLite migrations (users, settings, devices, alert_rules, alert_events, notification_log, hierarchy tables, credentials, HA fields — 20 migrations as of this writing)
+✅ JWT + httpOnly refresh token auth
+✅ Okta SAML 2.0 SSO
+✅ Notification channels: `inapp`, `email`, `slack`, `pagerduty`, `webhook` (TraceCat, listed in an earlier draft of this file, was never shipped — remove it from any future planning)
+✅ Backup scheduler + export/import bundle
+✅ systemd service definition (pktsnmp.service)
+✅ React + TypeScript + Tailwind + Vite frontend
+✅ Settings page — General / Security (Users, Auth, Suite Integration, AI Assistant, SSL-TLS) / Data (Storage, Backups) / Notifications / User Keys / SNMP (incl. Credential Library) / Hierarchy — see README's "Settings Layout" section for the full current tab map
+✅ Dashboard — environment hierarchy tree with live status rollup, recent traps/alerts widgets
+✅ Alerts — 12 built-in rule types, custom rules, CSV import/export, Investigate deep-links
+✅ AI Assistant panel (Claude, gated on `anthropic_api_key`, now under Settings → Security → AI Assistant)
+✅ install.sh (Ubuntu bare-metal installer — interactive install-dir + port prompts)
+✅ backup.py (local 2-rotation zip)
+✅ App-wide contextual help (`?` popovers on nearly every page/tab)
+✅ Per-user IP intelligence / reputation lookup (ipinfo.io + AbuseIPDB, per-user keys under Settings → User Keys)
 
----
+## Phase 2 — SNMP Engine (complete)
 
-## Phase 2 — SNMP Engine
-
-⬜ **Trap receiver** — UDP listener on configured port (default 162)  
-- Add pysnmp or easysnmp dependency  
-- Parse SNMP v1/v2c/v3 traps  
-- Write to `snmp_traps` table in DuckDB/ClickHouse  
-- Emit to alert engine  
-
-⬜ **Device registry** — CRUD for polled devices  
-- `GET/POST/PUT/DELETE /api/snmp/devices`  
-- Fields: ip, hostname, snmp_version, community, v3_creds, enabled, poll_interval_override  
-- UI: SNMP Devices tab under Settings  
-
-⬜ **Polling engine** — active OID polling  
-- Scheduled poll loop (APScheduler or asyncio)  
-- Per-device OID list configuration  
-- Write results to `snmp_poll_results` table  
-- Track device up/down state  
-
-⬜ **OID catalog** — human-readable OID names  
-- Bundle common OIDs (ifInOctets, sysDescr, hrProcessorLoad, etc.)  
-- Allow custom OID → label mappings per device  
-
----
+✅ **Trap receiver** — UDP listener on configured port (default 162), pysnmp-lextudio, v1/v2c/v3
+✅ **Device registry** — full CRUD, 5-level hierarchy assignment (Org/Group/Site/Location/Device), HA role/peer, CSV import/export
+✅ **Polling engine** — asyncio poll loop; scalar OIDs via GET, ifTable-indexed OIDs via per-interface GETBULK walk; closes its SNMP engine after each device to avoid fd leaks; polls every catalog OID each cycle (no truncation)
+✅ **OID catalog** — bundled common OIDs + custom OID/label mappings, CSV import/export, template download
 
 ## Phase 3 — Storage Implementation
 
-⬜ **DuckDB** — implement `ingest_trap`, `ingest_poll_result`, `query_traps`, `query_poll_history`  
-⬜ **ClickHouse** — implement same methods for `snmp_traps` and `snmp_poll_results` tables  
-⬜ Retention TTL enforcement for snmp_data (hook into settings `retention_days_raw`)  
+✅ **SQLite** (default) — `ingest_trap`, `ingest_poll_result`, `query_traps`, `query_poll_history`, `run_cleanup`, per-interface queries — all implemented in `app/storage/sqlite_ts.py`
+✅ **DuckDB** — same method set implemented in `app/storage/duckdb.py`
+⬜ **ClickHouse** — `app/storage/clickhouse.py` only implements `connect`/`close`/`health_check`; `ingest_trap`, `ingest_poll_result`, `query_traps`, `query_poll_history` all raise `NotImplementedError`. **Do not select ClickHouse as the storage backend** until this is finished — see README's Database Backends section.
+✅ Retention: SNMP raw data (`snmp_traps`/`snmp_poll_results`) purges via `run_cleanup(retention_days_raw)`, triggerable via `/api/snmp/cleanup` or `/api/system/cleanup`; alert_events/notification_log purge automatically once/day via `AlertCleanup`
+⬜ Automatic (scheduled) purge of SNMP raw data — currently admin-triggered only, unlike the alert-event cleanup which already runs on its own daily loop
+
+## Phase 4 — Alert Engine (complete)
+
+✅ Real alert rules engine, 12 built-in rule types (`device_unreachable`, `interface_down`, `flapping`, `metric_threshold`, `metric_spike`, `error_rate`, `discard_rate`, `high_error_ratio`, `bandwidth_utilization`, `speed_change`, `collector_gap`, `trap_received`) — all deletable, none permanently protected by id
+✅ Fire → `alert_events` row, device status sync, cooldown, resolve-on-recovery
+✅ Alerts UI — Active/History, ack/ack-all, severity + time-range filtering (incl. custom range), CSV import/export/template, Investigate deep-links to Metrics/Collectors/Dashboard
+✅ Layout header badge — unresolved/unacknowledged count, polls every 30s
+
+## Phase 5 — Dashboard (complete)
+
+✅ Environment hierarchy tree (Org→Group→Site→Location→Device) with worst-case status rollup and pulsing alert/down indicators
+✅ Recent-traps widget
+✅ Per-device Metrics pages: Traffic/Packets/Errors&Discards/IP-Protocol by interface, plus a separate System Resources (CPU/Memory/Storage) page
+✅ Active alert count wired to real alert events
+✅ Disabled-device banners on Dashboard and Metrics (a disabled device's tile is visibly marked and non-interactive rather than silently showing stale data)
+
+## Phase 6 — Polish (mostly complete)
+
+⬜ Dark/light theme toggle — app is dark-theme only, no toggle exists
+✅ CSV export of trap/poll and alert-rule data
+✅ Per-device OID/metrics dashboard pages
+⬜ Topology view (still not started — low priority, as originally noted)
 
 ---
 
-## Phase 4 — Alert Engine
+## Known Gaps (as of 2026-07-20)
 
-⬜ **Alert rules engine** — evaluate rules against incoming traps/poll results  
-- Rule types: device_down, unknown_trap_source, threshold_breach, specific_trap_oid  
-- Fire → write `alert_events`, trigger notification channels  
-- API: `GET/POST/PUT/DELETE /api/alerts/rules`  
+- **Poll interval setting is disconnected from the poll engine (real bug, not just a doc gap).** Settings → SNMP writes `snmp_poll_interval_seconds`; `app/snmp/poll_engine.py` reads a different key, `snmp_poll_default_interval_seconds`, which the UI never writes to — so the poll cadence silently stays at the hardcoded 60s default regardless of what an admin sets in the UI. Needs a code fix: make both sides use the same setting key. There's also an `snmp_poll_max_concurrency` setting with no UI control at all.
+- **ClickHouse storage backend is unimplemented.** Selectable in Settings → Data → Storage but will raise on first ingest/query. Treat SQLite/DuckDB as the only real options.
+- **IPQualityScore** has a key-storage slot (Settings → User Keys) but isn't wired into the IP intelligence lookup modal yet — only ipinfo.io + AbuseIPDB are actually queried.
+- **SNMP raw-data retention cleanup is manual-trigger only** (no daily scheduled job like the alert-event cleanup has).
+- **Docker distribution was built and then explicitly removed** (see PR #18 then #19) in favor of the Ubuntu bare-metal installer — don't resurrect a Dockerfile without confirming that decision has changed.
 
-⬜ **Alerts UI** — wire `GET /api/alerts/events` (currently stub returns [])  
-- Ack / Ack All  
-- Filter by severity, rule, device  
-- Show fired count in Layout header badge  
+## Changelog highlights (chronological, see `git log` for full detail)
 
----
-
-## Phase 5 — Dashboard
-
-⬜ **Trap timeline chart** — 24h bar chart of trap volume  
-⬜ **Device status grid** — up/down/unknown per device with last-seen  
-⬜ **OID sparklines** — per-device poll history for key OIDs  
-⬜ **Top trap sources** — table of devices by trap count  
-⬜ **Active alert count** — wire to real alert events  
-
----
-
-## Phase 6 — Polish
-
-⬜ Dark/light theme toggle  
-⬜ CSV export of trap and poll history  
-⬜ Per-device OID dashboard pages  
-⬜ Topology view (optional — low priority)  
+- Org→Group→Site hierarchy, device types, CSV import/export, real alert engine
+- SQLite made the default storage backend (was DuckDB)
+- SSL/TLS enable/disable toggle without restart; SAML SSO + admin-only settings fixes; 64-bit traffic counters
+- Docker support added, then removed in favor of a sanitized Ubuntu install path
+- Fresh-install bug sweep: `seed_admin` column bug, suite-token JSON crash, collector heartbeat endpoint, device-delete FK handling, `pysnmp` → `pysnmp-lextudio` rename, SNMP v2c/v3 mismatch — all fixed
+- Location added as a 4th hierarchy level (migrating installs auto-shift existing Group/Site data down); storage-backend default bug fixed; dashboard parent-device display fixed; dead alert-engine calls removed
+- Hierarchy inline-rename UI; disabled-device banners on Dashboard/Metrics
+- Local poll engine rewritten to collect real per-interface metrics (was previously not doing this at all) — root-caused a chain of 6 bugs; Metrics/Dashboard UX fixes
+- SNMP poll engine file-descriptor leak fixed (unclosed `SnmpEngine` per device); `oids[:20]` cap removed (was silently dropping every OID past the 20th, including all `hr*`/vendor OIDs)
+- Alert engine storage-routing + timezone-display fixes; time-range filtering (incl. custom range) added; bulk CSV import/export for collectors and alert rules
+- Application Logs server-side pagination; alert Investigate deep-links
+- App-wide contextual help; per-user IP intelligence/reputation lookup
+- Suite Integration settings label renamed (was "pktHub Integration"); Copy-Token fixed on HTTP; Enter-to-submit added to login

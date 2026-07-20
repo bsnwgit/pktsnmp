@@ -41,7 +41,7 @@ Each script:
 6. Removes the previous SNMP pipeline exporter
 7. Validates the new config (`otelcol validate`)
 8. Restarts `otelcol.service`
-9. Prints the token (shown once — paste it in Settings → Collectors if needed)
+9. Prints the token (shown once — paste it into the Collectors page if needed)
 
 After running, otelcol still exports to its original destination for all non-SNMP pipelines. Only the SNMP pipelines are redirected.
 
@@ -60,7 +60,7 @@ Examples:
 - `SNMP/SITE1/SW1/sysUpTime`
 - `SNMP/SITE2/FW1/ifOperStatus`
 
-pktSNMP parses these by stripping the `SNMP/` prefix and matching the `<SITE>/<DEVICE>` portion against the `otelcol_label` field on each device record. Set `otelcol_label` in Settings → Devices to match the collector's label exactly.
+pktSNMP parses these by stripping the `SNMP/` prefix and matching the `<SITE>/<DEVICE>` portion against the `otelcol_label` field on each device record. Set `otelcol_label` on the Devices page to match the collector's label exactly.
 
 ---
 
@@ -71,14 +71,20 @@ Each collector has a unique bearer token stored in the `collectors.api_token` co
 ```yaml
 exporters:
   otlphttp/pktsnmp:
-    endpoint: "http://SERVER-IP:8767"
+    endpoint: "http://SERVER-IP:8767/api/snmp/ingest/otlp"
     headers:
       Authorization: "Bearer <token>"
     tls:
       insecure: true
 ```
 
-Tokens can be rotated from **Settings → Collectors → Rotate Token**, then re-run the relevant update script.
+> **Note:** otelcol automatically appends `/v1/metrics` to the endpoint, so the actual POST hits `/api/snmp/ingest/otlp/v1/metrics`. Both paths are registered server-side.
+
+Tokens can be rotated from the **Collectors** page (top-level nav, not under Settings) → **Rotate Token**, then re-run the relevant update script.
+
+### Collector heartbeat
+
+A collector that has registered but has no devices assigned yet (or hasn't sent an OTLP batch recently) can still report itself online via `POST /api/snmp/ingest/heartbeat` (same bearer-token auth), which updates `last_seen`/`status='online'`/`version` without requiring a full metrics payload. This is what keeps a freshly-added collector's status from reading "unknown"/"offline" before its first real poll cycle.
 
 ---
 
@@ -89,25 +95,25 @@ The local collector (collector_id=1) is always running. It:
 - Listens for SNMP traps on UDP 162 (requires `CAP_NET_BIND_SERVICE` — already set in `pktsnmp.service`)
 - Reads its settings from SQLite at startup: `snmp_trap_enabled`, `snmp_poll_enabled`, `snmp_poll_default_interval_seconds`, `snmp_trap_port`
 
-To add a device for local polling, go to **Settings → Devices → Add Device** and set Collector to `local`.
+To add a device for local polling, go to the **Devices** page → **Add Device** and set Collector to `local`. Optionally assign a saved credential from the SNMP Credential Library (**Settings → SNMP**) instead of typing SNMP credentials inline — see the README's [SNMP Credential Library](../README.md#snmp-credential-library) section.
 
 ---
 
 ## Adding a New Collector
 
-1. Go to **Settings → Collectors → Add Collector**
+1. Go to the **Collectors** page → **Add Collector**
 2. Enter a name, description, and IP
 3. Copy the generated token — it is shown only once
 4. Install otelcol on the new host (or configure an existing instance)
 5. Add an `otlphttp/pktsnmp` exporter block with the token
-6. Add devices in **Settings → Devices** with the correct `collector_id` and `otelcol_label`
+6. Add devices on the **Devices** page with the correct `collector_id` and `otelcol_label`
 
 ### Minimal otelcol exporter config block
 
 ```yaml
 exporters:
   otlphttp/pktsnmp:
-    endpoint: "http://SERVER-IP:8767"
+    endpoint: "http://SERVER-IP:8767/api/snmp/ingest/otlp"
     headers:
       Authorization: "Bearer YOUR_TOKEN_HERE"
     tls:

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { getToken, OID_META } from '../api/client'
 import HelpButton from '../components/HelpButton'
@@ -1062,6 +1062,61 @@ function RuleForm({
   )
 }
 
+// ── Pagination ────────────────────────────────────────────────────────────────
+
+const PAGE_SIZE = 25
+
+/**
+ * Page-number bar: shows every page when there are 5 or fewer, otherwise
+ * pages 1-5, an ellipsis, then the last page — plus prev/next buttons.
+ */
+function Pagination({ page, totalPages, onChange }: { page: number; totalPages: number; onChange: (p: number) => void }) {
+  if (totalPages <= 1) return null
+  // The visible block of 5 slides with the current page — e.g. Next from
+  // page 5 moves to page 6 and the block updates to show 6-10, not a fixed
+  // 1-5. Same in reverse for Prev.
+  const blockStart = Math.floor((page - 1) / 5) * 5 + 1
+  const blockEnd   = Math.min(blockStart + 4, totalPages)
+  const pages = Array.from({ length: blockEnd - blockStart + 1 }, (_, i) => blockStart + i)
+  const btn = (p: number) => [
+    'text-xs min-w-[1.75rem] px-2 py-1 rounded-lg border transition-colors',
+    p === page
+      ? 'bg-blue-600/30 border-blue-500 text-blue-200'
+      : 'bg-gray-800 border-gray-700 text-gray-400 hover:text-white',
+  ].join(' ')
+  return (
+    <div className="flex items-center gap-1.5">
+      <button
+        onClick={() => onChange(Math.max(1, page - 1))}
+        disabled={page === 1}
+        className="text-xs px-2.5 py-1 rounded-lg border border-gray-700 bg-gray-800 text-gray-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+      >
+        ← Prev
+      </button>
+      {blockStart > 1 && (
+        <>
+          <button onClick={() => onChange(1)} className={btn(1)}>1</button>
+          <span className="px-1 text-gray-500 text-xs">..</span>
+        </>
+      )}
+      {pages.map(p => <button key={p} onClick={() => onChange(p)} className={btn(p)}>{p}</button>)}
+      {blockEnd < totalPages && (
+        <>
+          <span className="px-1 text-gray-500 text-xs">..</span>
+          <button onClick={() => onChange(totalPages)} className={btn(totalPages)}>{totalPages}</button>
+        </>
+      )}
+      <button
+        onClick={() => onChange(Math.min(totalPages, page + 1))}
+        disabled={page === totalPages}
+        className="text-xs px-2.5 py-1 rounded-lg border border-gray-700 bg-gray-800 text-gray-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+      >
+        Next →
+      </button>
+    </div>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 type Tab = 'active' | 'history' | 'rules'
 
@@ -1083,6 +1138,8 @@ export default function Alerts() {
   const [historyFilter, setHistoryFilter]       = useState('')
   const [historySevFilter, setHistorySevFilter] = useState('')
   const [historyWindow, setHistoryWindow]       = useState<TimeWindow>({})
+  const [eventsPage, setEventsPage]             = useState(1)
+  const [historyPage, setHistoryPage]           = useState(1)
   const [rulesFilter, setRulesFilter]           = useState('')
   const [rulesTopicFilter, setRulesTopicFilter] = useState('')
   const [rulesSortKey, setRulesSortKey]         = useState<keyof AlertRule | 'topic' | null>(null)
@@ -1168,6 +1225,22 @@ export default function Alerts() {
     await fetch('/api/alerts/events/ack-all', { method: 'POST', headers: authHeaders() })
     await loadEvents()
   }
+
+  const filteredEvents = useMemo(() => events.filter(e =>
+    (!eventsSevFilter || e.severity === eventsSevFilter) &&
+    (!eventsFilter || e.rule_name.toLowerCase().includes(eventsFilter.toLowerCase()) || e.message.toLowerCase().includes(eventsFilter.toLowerCase()))
+  ), [events, eventsSevFilter, eventsFilter])
+  const eventsTotalPages = Math.max(1, Math.ceil(filteredEvents.length / PAGE_SIZE))
+  const eventsPageClamped = Math.min(eventsPage, eventsTotalPages)
+  const pagedEvents = filteredEvents.slice((eventsPageClamped - 1) * PAGE_SIZE, eventsPageClamped * PAGE_SIZE)
+
+  const filteredHistory = useMemo(() => history.filter(e =>
+    (!historySevFilter || e.severity === historySevFilter) &&
+    (!historyFilter || e.rule_name.toLowerCase().includes(historyFilter.toLowerCase()) || e.message.toLowerCase().includes(historyFilter.toLowerCase()))
+  ), [history, historySevFilter, historyFilter])
+  const historyTotalPages = Math.max(1, Math.ceil(filteredHistory.length / PAGE_SIZE))
+  const historyPageClamped = Math.min(historyPage, historyTotalPages)
+  const pagedHistory = filteredHistory.slice((historyPageClamped - 1) * PAGE_SIZE, historyPageClamped * PAGE_SIZE)
 
   const handleToggle = async (rule: AlertRule) => {
     setRules(rs => rs.map(r => r.id === rule.id ? { ...r, enabled: !r.enabled } : r))
@@ -1364,14 +1437,14 @@ export default function Alerts() {
           <div className="flex items-center gap-3 flex-wrap">
             <input
               value={eventsFilter}
-              onChange={e => setEventsFilter(e.target.value)}
+              onChange={e => { setEventsFilter(e.target.value); setEventsPage(1) }}
               placeholder="Filter by rule name or message…"
               className="bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1 text-xs text-white placeholder-gray-600 w-56 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
-            {eventsFilter && <button onClick={() => setEventsFilter('')} className="text-xs text-white hover:text-white">✕</button>}
+            {eventsFilter && <button onClick={() => { setEventsFilter(''); setEventsPage(1) }} className="text-xs text-white hover:text-white">✕</button>}
             <select
               value={eventsSevFilter}
-              onChange={e => setEventsSevFilter(e.target.value)}
+              onChange={e => { setEventsSevFilter(e.target.value); setEventsPage(1) }}
               className="bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1 text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
               <option value="">All severities</option>
@@ -1379,17 +1452,11 @@ export default function Alerts() {
               <option value="warning">Warning</option>
               <option value="info">Info</option>
             </select>
-            {eventsSevFilter && <button onClick={() => setEventsSevFilter('')} className="text-xs text-white hover:text-white">✕</button>}
-            <TimeRangeControl onChange={setEventsWindow} />
+            {eventsSevFilter && <button onClick={() => { setEventsSevFilter(''); setEventsPage(1) }} className="text-xs text-white hover:text-white">✕</button>}
+            <TimeRangeControl onChange={w => { setEventsWindow(w); setEventsPage(1) }} />
             {(eventsFilter || eventsSevFilter) && (
               <span className="text-xs text-white ml-auto">
-                {events.filter(e =>
-                  (!eventsSevFilter || e.severity === eventsSevFilter) &&
-                  (!eventsFilter || e.rule_name.toLowerCase().includes(eventsFilter.toLowerCase()) || e.message.toLowerCase().includes(eventsFilter.toLowerCase()))
-                ).length} result{events.filter(e =>
-                  (!eventsSevFilter || e.severity === eventsSevFilter) &&
-                  (!eventsFilter || e.rule_name.toLowerCase().includes(eventsFilter.toLowerCase()) || e.message.toLowerCase().includes(eventsFilter.toLowerCase()))
-                ).length !== 1 ? 's' : ''}
+                {filteredEvents.length} result{filteredEvents.length !== 1 ? 's' : ''}
               </span>
             )}
           </div>
@@ -1400,18 +1467,20 @@ export default function Alerts() {
               <p className="text-sm">No unacknowledged alerts</p>
             </div>
           )}
-          {events
-            .filter(e =>
-              (!eventsSevFilter || e.severity === eventsSevFilter) &&
-              (!eventsFilter || e.rule_name.toLowerCase().includes(eventsFilter.toLowerCase()) || e.message.toLowerCase().includes(eventsFilter.toLowerCase()))
-            )
-            .map(e => <EventCard key={e.id} event={e} onAck={handleAck} />)
-          }
-          {!loading && events.length > 0 && events.filter(e =>
-            (!eventsSevFilter || e.severity === eventsSevFilter) &&
-            (!eventsFilter || e.rule_name.toLowerCase().includes(eventsFilter.toLowerCase()) || e.message.toLowerCase().includes(eventsFilter.toLowerCase()))
-          ).length === 0 && (
+          {!loading && events.length > 0 && filteredEvents.length === 0 && (
             <p className="text-sm text-white text-center py-8">No alerts match this filter</p>
+          )}
+          {filteredEvents.length > 0 && (
+            <Pagination page={eventsPageClamped} totalPages={eventsTotalPages} onChange={setEventsPage} />
+          )}
+          {pagedEvents.map(e => <EventCard key={e.id} event={e} onAck={handleAck} />)}
+          {filteredEvents.length > 0 && (
+            <div className="flex items-center justify-between text-xs text-gray-500 pt-1">
+              <span>
+                Showing {((eventsPageClamped - 1) * PAGE_SIZE + 1).toLocaleString()}–{((eventsPageClamped - 1) * PAGE_SIZE + pagedEvents.length).toLocaleString()} of {filteredEvents.length.toLocaleString()} alerts
+              </span>
+              <Pagination page={eventsPageClamped} totalPages={eventsTotalPages} onChange={setEventsPage} />
+            </div>
           )}
         </div>
       )}
@@ -1423,14 +1492,14 @@ export default function Alerts() {
           <div className="flex items-center gap-3 flex-wrap">
             <input
               value={historyFilter}
-              onChange={e => setHistoryFilter(e.target.value)}
+              onChange={e => { setHistoryFilter(e.target.value); setHistoryPage(1) }}
               placeholder="Filter by rule name or message…"
               className="bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1 text-xs text-white placeholder-gray-600 w-56 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
-            {historyFilter && <button onClick={() => setHistoryFilter('')} className="text-xs text-white hover:text-white">✕</button>}
+            {historyFilter && <button onClick={() => { setHistoryFilter(''); setHistoryPage(1) }} className="text-xs text-white hover:text-white">✕</button>}
             <select
               value={historySevFilter}
-              onChange={e => setHistorySevFilter(e.target.value)}
+              onChange={e => { setHistorySevFilter(e.target.value); setHistoryPage(1) }}
               className="bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1 text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
               <option value="">All severities</option>
@@ -1438,17 +1507,11 @@ export default function Alerts() {
               <option value="warning">Warning</option>
               <option value="info">Info</option>
             </select>
-            {historySevFilter && <button onClick={() => setHistorySevFilter('')} className="text-xs text-white hover:text-white">✕</button>}
-            <TimeRangeControl onChange={setHistoryWindow} />
+            {historySevFilter && <button onClick={() => { setHistorySevFilter(''); setHistoryPage(1) }} className="text-xs text-white hover:text-white">✕</button>}
+            <TimeRangeControl onChange={w => { setHistoryWindow(w); setHistoryPage(1) }} />
             {(historyFilter || historySevFilter) && (
               <span className="text-xs text-white ml-auto">
-                {history.filter(e =>
-                  (!historySevFilter || e.severity === historySevFilter) &&
-                  (!historyFilter || e.rule_name.toLowerCase().includes(historyFilter.toLowerCase()) || e.message.toLowerCase().includes(historyFilter.toLowerCase()))
-                ).length} result{history.filter(e =>
-                  (!historySevFilter || e.severity === historySevFilter) &&
-                  (!historyFilter || e.rule_name.toLowerCase().includes(historyFilter.toLowerCase()) || e.message.toLowerCase().includes(historyFilter.toLowerCase()))
-                ).length !== 1 ? 's' : ''}
+                {filteredHistory.length} result{filteredHistory.length !== 1 ? 's' : ''}
               </span>
             )}
           </div>
@@ -1457,18 +1520,20 @@ export default function Alerts() {
               <p className="text-sm">No alert history</p>
             </div>
           )}
-          {history
-            .filter(e =>
-              (!historySevFilter || e.severity === historySevFilter) &&
-              (!historyFilter || e.rule_name.toLowerCase().includes(historyFilter.toLowerCase()) || e.message.toLowerCase().includes(historyFilter.toLowerCase()))
-            )
-            .map(e => <EventCard key={e.id} event={e} onAck={handleAck} />)
-          }
-          {history.length > 0 && history.filter(e =>
-            (!historySevFilter || e.severity === historySevFilter) &&
-            (!historyFilter || e.rule_name.toLowerCase().includes(historyFilter.toLowerCase()) || e.message.toLowerCase().includes(historyFilter.toLowerCase()))
-          ).length === 0 && (
+          {history.length > 0 && filteredHistory.length === 0 && (
             <p className="text-sm text-white text-center py-8">No alerts match this filter</p>
+          )}
+          {filteredHistory.length > 0 && (
+            <Pagination page={historyPageClamped} totalPages={historyTotalPages} onChange={setHistoryPage} />
+          )}
+          {pagedHistory.map(e => <EventCard key={e.id} event={e} onAck={handleAck} />)}
+          {filteredHistory.length > 0 && (
+            <div className="flex items-center justify-between text-xs text-gray-500 pt-1">
+              <span>
+                Showing {((historyPageClamped - 1) * PAGE_SIZE + 1).toLocaleString()}–{((historyPageClamped - 1) * PAGE_SIZE + pagedHistory.length).toLocaleString()} of {filteredHistory.length.toLocaleString()} alerts
+              </span>
+              <Pagination page={historyPageClamped} totalPages={historyTotalPages} onChange={setHistoryPage} />
+            </div>
           )}
         </div>
       )}

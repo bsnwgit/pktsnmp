@@ -390,6 +390,15 @@ function ChartSection({ title, data, oids, colors, unit, alertEvents = [], noDat
   )
 }
 
+function MetricStat({ label, value, valueClass = 'text-gray-300' }: { label: string; value: string; valueClass?: string }) {
+  return (
+    <div className="bg-gray-800/60 rounded-lg px-2.5 py-1.5 min-w-0">
+      <p className="text-[10px] uppercase tracking-wide text-gray-500 truncate">{label}</p>
+      <p className={`text-sm font-mono font-medium truncate ${valueClass}`}>{value}</p>
+    </div>
+  )
+}
+
 function DeviceCard({ card, onClick }: { card: DeviceMetricsCard; onClick: () => void }) {
   const { device, latest, has_data } = card
   const icon   = DEVICE_TYPE_ICONS[device.device_type] ?? '📦'
@@ -399,6 +408,7 @@ function DeviceCard({ card, onClick }: { card: DeviceMetricsCard; onClick: () =>
   const outOctets = latest['ifOutOctets']?.value_numeric
   const inErrors  = latest['ifInErrors']?.value_numeric
   const outErrors = latest['ifOutErrors']?.value_numeric
+  const totalErrors = (inErrors ?? 0) + (outErrors ?? 0)
   const uptime    = latest['sysUpTime']?.value_numeric
   const cpu       = latest['hrProcessorLoad']?.value_numeric
   const lastSeen  = device.last_seen
@@ -409,7 +419,7 @@ function DeviceCard({ card, onClick }: { card: DeviceMetricsCard; onClick: () =>
     <button
       onClick={() => { if (device.enabled) onClick() }}
       className={[
-        'relative text-left w-full rounded-xl border p-4 transition-all duration-150',
+        'relative text-left w-full rounded-xl border transition-all duration-150 overflow-hidden',
         device.enabled
           ? 'hover:border-blue-500/50 hover:shadow-lg hover:shadow-blue-900/10 cursor-pointer'
           : 'cursor-not-allowed',
@@ -422,89 +432,68 @@ function DeviceCard({ card, onClick }: { card: DeviceMetricsCard; onClick: () =>
       ].join(' ')}
     >
       {!device.enabled && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10 rounded-xl overflow-hidden">
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
           <div className="w-full h-8 bg-gray-950/75 border-y border-gray-700/60 flex items-center justify-center">
             <span className="text-sm font-extrabold tracking-[0.2em] text-red-500">DISABLED</span>
           </div>
         </div>
       )}
 
-      {/* Header */}
-      <div className="flex items-start justify-between gap-2 mb-2">
-        <div className="flex items-center gap-2 min-w-0">
+      <div className="flex items-center gap-4 p-3 flex-wrap lg:flex-nowrap">
+        {/* Identity */}
+        <div className="flex items-center gap-2.5 min-w-[180px] flex-shrink-0">
           <span className="text-xl flex-shrink-0">{icon}</span>
           <div className="min-w-0">
             <p className="font-semibold text-sm text-gray-100 truncate">{device.name}</p>
-            <p className="text-xs text-gray-500 font-mono">{device.ip}</p>
+            <p className="text-xs text-gray-500 font-mono truncate">{device.ip}</p>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <StatusDot status={status} />
+              <span className="text-xs text-gray-400 capitalize">{status}</span>
+            </div>
           </div>
         </div>
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          <StatusDot status={status} />
-          <span className="text-xs text-gray-400 capitalize">{status}</span>
+
+        {/* Badges */}
+        <div className="flex flex-wrap gap-1 min-w-[90px] max-w-[170px] flex-shrink-0">
+          {device.org  && <span className="text-xs px-1.5 py-0.5 rounded bg-blue-900/30 text-blue-300">{device.org}</span>}
+          {device.site && <span className="text-xs px-1.5 py-0.5 rounded bg-purple-900/30 text-purple-300">{device.site}</span>}
+          {device.device_type && (
+            <span className="text-xs px-1.5 py-0.5 rounded bg-gray-800 text-gray-400 capitalize">
+              {device.device_type.replace('_', ' ')}
+            </span>
+          )}
+        </div>
+
+        {/* Metrics — row of labeled columns */}
+        <div className="flex-1 min-w-[240px]">
+          {has_data ? (
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+              <MetricStat label="↓ In" value={inOctets != null ? fmt(inOctets * 8, 'bps') : '—'} valueClass="text-blue-300" />
+              <MetricStat label="↑ Out" value={outOctets != null ? fmt(outOctets * 8, 'bps') : '—'} valueClass="text-purple-300" />
+              <MetricStat label="Errors" value={totalErrors.toFixed(0)} valueClass={totalErrors > 0 ? 'text-red-400' : 'text-gray-400'} />
+              <MetricStat label="Uptime" value={fmtUptime(uptime)} />
+              {cpu != null ? (
+                <MetricStat
+                  label="CPU"
+                  value={`${cpu.toFixed(0)}%`}
+                  valueClass={cpu > 80 ? 'text-red-400' : cpu > 60 ? 'text-yellow-400' : 'text-green-400'}
+                />
+              ) : (
+                <MetricStat label="Seen" value={lastSeen ?? '—'} valueClass="text-gray-500" />
+              )}
+            </div>
+          ) : (
+            <div className="h-11 flex items-center justify-center text-xs text-gray-600 border border-dashed border-gray-800 rounded-lg">
+              No SNMP data received
+            </div>
+          )}
+        </div>
+
+        {/* Action */}
+        <div className="flex items-center flex-shrink-0 pl-1">
+          {device.enabled && <span className="text-xs text-blue-400/50 whitespace-nowrap">View metrics →</span>}
         </div>
       </div>
-
-      {/* Badges */}
-      <div className="flex flex-wrap gap-1 mb-3">
-        {device.org  && <span className="text-xs px-1.5 py-0.5 rounded bg-blue-900/30 text-blue-300">{device.org}</span>}
-        {device.site && <span className="text-xs px-1.5 py-0.5 rounded bg-purple-900/30 text-purple-300">{device.site}</span>}
-        {device.device_type && (
-          <span className="text-xs px-1.5 py-0.5 rounded bg-gray-800 text-gray-400 capitalize">
-            {device.device_type.replace('_', ' ')}
-          </span>
-        )}
-      </div>
-
-      {/* Metrics */}
-      {has_data ? (
-        <div className="space-y-2">
-          <div className="grid grid-cols-2 gap-2">
-            <div className="bg-gray-800/60 rounded-lg p-2">
-              <p className="text-xs text-gray-500 mb-0.5">↓ In</p>
-              <p className="text-sm font-mono font-medium text-blue-300">
-                {inOctets != null ? fmt(inOctets * 8, 'bps') : '—'}
-              </p>
-            </div>
-            <div className="bg-gray-800/60 rounded-lg p-2">
-              <p className="text-xs text-gray-500 mb-0.5">↑ Out</p>
-              <p className="text-sm font-mono font-medium text-purple-300">
-                {outOctets != null ? fmt(outOctets * 8, 'bps') : '—'}
-              </p>
-            </div>
-          </div>
-          <div className="grid grid-cols-3 gap-1 text-xs text-center">
-            <div>
-              <p className="text-gray-500">Errors</p>
-              <p className={`font-mono ${(inErrors ?? 0) + (outErrors ?? 0) > 0 ? 'text-red-400' : 'text-gray-400'}`}>
-                {((inErrors ?? 0) + (outErrors ?? 0)).toFixed(0)}
-              </p>
-            </div>
-            <div>
-              <p className="text-gray-500">Uptime</p>
-              <p className="text-gray-300 font-mono">{fmtUptime(uptime)}</p>
-            </div>
-            {cpu != null ? (
-              <div>
-                <p className="text-gray-500">CPU</p>
-                <p className={`font-mono ${cpu > 80 ? 'text-red-400' : cpu > 60 ? 'text-yellow-400' : 'text-green-400'}`}>
-                  {cpu.toFixed(0)}%
-                </p>
-              </div>
-            ) : (
-              <div>
-                <p className="text-gray-500">Seen</p>
-                <p className="text-gray-500 truncate">{lastSeen ?? '—'}</p>
-              </div>
-            )}
-          </div>
-        </div>
-      ) : (
-        <div className="h-14 flex items-center justify-center text-xs text-gray-600 border border-dashed border-gray-800 rounded-lg">
-          No SNMP data received
-        </div>
-      )}
-
-      {device.enabled && <p className="text-xs text-blue-400/50 text-right mt-2">View metrics →</p>}
     </button>
   )
 }
@@ -708,12 +697,18 @@ export default function MetricsPage() {
   const selectedCard  = useMemo(() => overviewCards.find(c => c.device.id === selectedDeviceId) ?? null, [overviewCards, selectedDeviceId])
   const selectedIface = useMemo(() => interfaces.find(i => i.interface_label === selectedIfLabel) ?? null, [interfaces, selectedIfLabel])
 
-  const filteredCards = useMemo(() => overviewCards.filter(c => {
-    if (searchQ && !c.device.name.toLowerCase().includes(searchQ.toLowerCase()) && !c.device.ip.includes(searchQ)) return false
-    if (typeFilter && c.device.device_type !== typeFilter) return false
-    if (orgFilter  && c.device.org !== orgFilter) return false
-    return true
-  }), [overviewCards, searchQ, typeFilter, orgFilter])
+  // Disabled devices sink to the bottom of the list (re-surface once re-enabled).
+  // Array.sort is stable, so relative order within each enabled/disabled group
+  // is otherwise preserved.
+  const filteredCards = useMemo(() => overviewCards
+    .filter(c => {
+      if (searchQ && !c.device.name.toLowerCase().includes(searchQ.toLowerCase()) && !c.device.ip.includes(searchQ)) return false
+      if (typeFilter && c.device.device_type !== typeFilter) return false
+      if (orgFilter  && c.device.org !== orgFilter) return false
+      return true
+    })
+    .sort((a, b) => Number(b.device.enabled) - Number(a.device.enabled))
+  , [overviewCards, searchQ, typeFilter, orgFilter])
 
   const allTypes = useMemo(() => [...new Set(overviewCards.map(c => c.device.device_type).filter(Boolean))].sort(), [overviewCards])
   const allOrgs  = useMemo(() => [...new Set(overviewCards.map(c => c.device.org).filter(Boolean))].sort(), [overviewCards])
@@ -878,7 +873,7 @@ export default function MetricsPage() {
               {overviewCards.length === 0 ? 'No devices registered' : 'No devices match filters'}
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            <div className="flex flex-col gap-3">
               {filteredCards.map(card => (
                 <DeviceCard key={card.device.id} card={card} onClick={() => goDevice(card.device.id)} />
               ))}
