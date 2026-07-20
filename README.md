@@ -1,5 +1,9 @@
 # pktSNMP
 
+<p align="center">
+  <img src="lockup-256h.png" alt="pktSNMP" height="64">
+</p>
+
 SNMP ingest management and visualization platform — part of the pkt suite. Receives SNMP data from remote otelcol collectors and local devices, stores it in SQLite (or ClickHouse/DuckDB), and surfaces it through a React UI with real-time alerting and an AI assistant.
 
 **Default port:** `8767` (HTTP) — see [SSL/TLS](#ssltls) for HTTPS.
