@@ -1,9 +1,10 @@
 #!/bin/bash
 # pktSNMP install script — Ubuntu Server 22.04/24.04 LTS
 # Usage: bash install.sh
-# Prompts for the install directory (default /opt/pktsnmp) when run interactively.
-# Override defaults with env vars to skip the prompt, e.g.:
-#   PKTSNMP_INSTALL_DIR=/opt/pktsnmp PKTSNMP_SERVICE_USER=pktsnmp bash install.sh
+# Prompts for the install directory (default /opt/pktsnmp) and port (default
+# 8767) when run interactively.
+# Override defaults with env vars to skip the prompts, e.g.:
+#   PKTSNMP_INSTALL_DIR=/opt/pktsnmp PKTSNMP_SERVICE_USER=pktsnmp PKTSNMP_PORT=8767 bash install.sh
 
 set -euo pipefail
 
@@ -12,6 +13,12 @@ if [ -z "${PKTSNMP_INSTALL_DIR:-}" ] && [ -t 0 ]; then
     INSTALL_DIR="${INSTALL_DIR_INPUT:-/opt/pktsnmp}"
 else
     INSTALL_DIR="${PKTSNMP_INSTALL_DIR:-/opt/pktsnmp}"
+fi
+if [ -z "${PKTSNMP_PORT:-}" ] && [ -t 0 ]; then
+    read -rp "Port [8767]: " PORT_INPUT
+    PORT="${PORT_INPUT:-8767}"
+else
+    PORT="${PKTSNMP_PORT:-8767}"
 fi
 LOG_DIR="${PKTSNMP_LOG_DIR:-$INSTALL_DIR/logs}"
 SERVICE_USER="${PKTSNMP_SERVICE_USER:-$(whoami)}"
@@ -24,6 +31,7 @@ LOCAL_IP="$(hostname -I | awk '{print $1}')"
 echo "=== pktSNMP Installer ==="
 echo "Install dir: $INSTALL_DIR"
 echo "Service user: $SERVICE_USER"
+echo "Port: $PORT"
 echo ""
 
 # ── 1. System packages ────────────────────────────────────────────────────────
@@ -66,7 +74,8 @@ if [ ! -f "$INSTALL_DIR/config.yaml" ]; then
     # Generate a random secret key
     SECRET=$(openssl rand -hex 32)
     sed -i "s/CHANGE_ME_generate_with_openssl_rand_hex_32/$SECRET/" "$INSTALL_DIR/config.yaml"
-    sed -i "s#http://SERVER-IP:8767#http://$LOCAL_IP:8767#g" "$INSTALL_DIR/config.yaml"
+    sed -i "s#http://SERVER-IP:8767#http://$LOCAL_IP:$PORT#g" "$INSTALL_DIR/config.yaml"
+    sed -i "s/^port: 8767/port: $PORT/" "$INSTALL_DIR/config.yaml"
     # Pin install_dir explicitly (app/config.py derives every other path —
     # db, logs, ssl, backups — from this by default).
     echo "install_dir: \"$INSTALL_DIR\"" >> "$INSTALL_DIR/config.yaml"
@@ -136,7 +145,7 @@ echo ""
 echo "╔══════════════════════════════════════════════════════════╗"
 echo "║             pktSNMP installed successfully!               ║"
 echo "╠══════════════════════════════════════════════════════════╣"
-printf "║  URL:           http://%-35s║\n" "$LOCAL_IP:8767"
+printf "║  URL:           http://%-35s║\n" "$LOCAL_IP:$PORT"
 echo "║  Username:      admin                                    ║"
 printf "║  Password:      %-43s║\n" "$ADMIN_PASS"
 echo "║                                                          ║"
@@ -154,6 +163,6 @@ if [ "$FRONTEND_BUILT" -eq 0 ]; then
     echo ""
 fi
 echo "Next steps:"
-echo "  1. Open the firewall for TCP 8767 (and UDP 162 if using the trap receiver)"
+echo "  1. Open the firewall for TCP $PORT (and UDP 162 if using the trap receiver)"
 echo "  2. Log in and change the admin password in Settings → Users"
 echo "  3. Add devices in Devices, and configure collectors in Settings → Collectors"
