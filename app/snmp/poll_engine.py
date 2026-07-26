@@ -36,6 +36,40 @@ IFNAME_OID = "1.3.6.1.2.1.31.1.1.1.1"
 IFDESCR_OID = "1.3.6.1.2.1.2.2.1.2"
 IFALIAS_OID = "1.3.6.1.2.1.31.1.1.1.18"
 
+# Topology OIDs — walked unconditionally per device (independent of the
+# gauge/counter oid_catalog above) to populate the arp_entries/routes/
+# interfaces tables the Suite Integration API exposes to sibling apps
+# (currently pktIPAM). Same MIB columns pktIPAM's own snmp_generic device
+# collector walks directly — see [[pktipam-routing-tables-idea]].
+ARP_PHYS_ADDR_OID = "1.3.6.1.2.1.4.22.1.2"          # ipNetToMediaPhysAddress
+DOT1D_BASE_PORT_IF_INDEX_OID = "1.3.6.1.2.1.17.1.4.1.2"
+DOT1Q_PVID_OID = "1.3.6.1.2.1.17.7.1.4.5.1.1"
+
+# IP-FORWARD-MIB ipCidrRouteTable — INDEX is {ipCidrRouteDest,
+# ipCidrRouteMask, ipCidrRouteTos, ipCidrRouteNextHop} (4+4+1+4 = 13
+# sub-identifiers after the column OID), so every column walk below
+# shares the same 13-part suffix and rows are correlated by it.
+ROUTE_IF_INDEX_OID = "1.3.6.1.2.1.4.24.4.1.5"
+ROUTE_PROTO_OID = "1.3.6.1.2.1.4.24.4.1.7"
+ROUTE_METRIC1_OID = "1.3.6.1.2.1.4.24.4.1.11"
+
+# ipCidrRouteProto enumeration — codes not listed here fall back to "other".
+ROUTE_PROTO_NAMES = {
+    2: "local", 3: "static", 4: "icmp", 5: "egp", 6: "ggp", 7: "hello",
+    8: "rip", 9: "is-is", 10: "es-is", 11: "igrp", 12: "bbn-spf-igp",
+    13: "ospf", 14: "bgp", 15: "idpr", 16: "eigrp",
+}
+
+
+def _mac_from_bytes(value) -> str:
+    raw = bytes(value)
+    return ":".join(f"{b:02x}" for b in raw) if raw else ""
+
+
+def _mask_to_prefixlen(mask: str) -> int:
+    import ipaddress
+    return ipaddress.IPv4Network(f"0.0.0.0/{mask}").prefixlen
+
 
 async def _walk_column(engine, auth_data, target, ctx, root_oid: str, max_rows: int = 128, batch: int = 25) -> dict[str, object]:
     """GETBULK-walk every instance under root_oid, keyed by the OID suffix (row index)."""
@@ -64,6 +98,148 @@ async def _walk_column(engine, auth_data, target, ctx, root_oid: str, max_rows: 
         if done:
             break
     return out
+
+
+async def _poll_topology(engine, auth_data, target, ctx, if_labels: dict[str, str]) -> dict[str, list[dict]]:
+    """Walks ARP (ipNetToMediaTable), per-port VLAN (dot1qPvid), and the
+    IPv4 routing table (ipCidrRouteTable) — reuses the caller's already-open
+    engine/auth_data/target/ctx (and its already-walked if_labels) rather
+    than opening a second SnmpEngine, since it's the same device either
+    way. Each walk is independently non-fatal: a device with no route
+    table support (or no VLAN MIB) still reports its ARP table, etc.
+    Returns {"arp": [...], "routes": [...], "interfaces": [...]}.
+    """
+    arp: list[dict] = []
+    routes: list[dict] = []
+    interfaces: list[dict] = [
+        {"if_index": if_index, "if_name": name} for if_index, name in if_labels.items()
+    ]
+
+    # -- dot1dBasePort -> ifIndex, then ifIndex -> PVID (best-effort VLAN) ----------
+    port_to_vlan: dict[str, int] = {}
+    try:
+        base_port_to_ifindex = {
+            suffix: str(value)
+            for suffix, value in (await _walk_column(engine, auth_data, target, ctx, DOT1D_BASE_PORT_IF_INDEX_OID)).items()
+        }
+        pvid_raw = await _walk_column(engine, auth_data, target, ctx, DOT1Q_PVID_OID)
+        for base_port, pvid in pvid_raw.items():
+            if_index = base_port_to_ifindex.get(base_port)
+            if if_index:
+                port_to_vlan[if_index] = int(pvid)
+        for iface in interfaces:
+            vlan = port_to_vlan.get(iface["if_index"])
+            if vlan is not None:
+                iface["vlan_tag"] = vlan
+    except Exception as e:
+        log.debug(f"VLAN mapping (dot1dBasePortIfIndex/dot1qPvid) unavailable: {e}")
+
+    # -- ipNetToMediaTable (ARP: IP <-> MAC per ifIndex) -----------------------------
+    # INDEX is {ipNetToMediaIfIndex, ipNetToMediaNetAddress} — suffix is
+    # <ifIndex>.<ip1>.<ip2>.<ip3>.<ip4>.
+    try:
+        raw = await _walk_column(engine, auth_data, target, ctx, ARP_PHYS_ADDR_OID)
+        for suffix, value in raw.items():
+            parts = suffix.split(".")
+            if len(parts) < 5:
+                continue
+            if_index = parts[0]
+            entry_ip = ".".join(parts[-4:])
+            mac = _mac_from_bytes(value)
+            if not mac or mac == "00:00:00:00:00:00":
+                continue
+            arp.append({
+                "ip_address": entry_ip, "mac_address": mac,
+                "interface_label": if_labels.get(if_index, if_index),
+                "vlan_tag": port_to_vlan.get(if_index),
+            })
+    except Exception as e:
+        log.debug(f"ipNetToMediaTable walk failed: {e}")
+
+    # -- ipCidrRouteTable (routing table) --------------------------------------------
+    try:
+        route_if_index = {
+            suffix: str(value)
+            for suffix, value in (await _walk_column(engine, auth_data, target, ctx, ROUTE_IF_INDEX_OID)).items()
+        }
+    except Exception as e:
+        route_if_index = {}
+        log.debug(f"ipCidrRouteTable walk unavailable: {e}")
+
+    if route_if_index:
+        try:
+            route_proto = {
+                suffix: int(value)
+                for suffix, value in (await _walk_column(engine, auth_data, target, ctx, ROUTE_PROTO_OID)).items()
+            }
+        except Exception as e:
+            route_proto = {}
+            log.debug(f"ipCidrRouteProto walk unavailable: {e}")
+
+        try:
+            route_metric = {
+                suffix: int(value)
+                for suffix, value in (await _walk_column(engine, auth_data, target, ctx, ROUTE_METRIC1_OID)).items()
+            }
+        except Exception as e:
+            route_metric = {}
+            log.debug(f"ipCidrRouteMetric1 walk unavailable: {e}")
+
+        for suffix, if_index in route_if_index.items():
+            parts = suffix.split(".")
+            if len(parts) != 13:
+                continue
+            dest = ".".join(parts[0:4])
+            mask = ".".join(parts[4:8])
+            next_hop = ".".join(parts[9:13])
+            try:
+                prefixlen = _mask_to_prefixlen(mask)
+            except ValueError:
+                continue
+            proto_code = route_proto.get(suffix)
+            routes.append({
+                "destination": f"{dest}/{prefixlen}",
+                "next_hop": next_hop if next_hop != "0.0.0.0" else None,
+                "interface_label": if_labels.get(if_index, if_index),
+                "protocol": ROUTE_PROTO_NAMES.get(proto_code, "other") if proto_code else None,
+                "metric": route_metric.get(suffix),
+            })
+
+    return {"arp": arp, "routes": routes, "interfaces": interfaces}
+
+
+async def _persist_topology(db_path: str, device_id: int, topology: dict[str, list[dict]]) -> None:
+    """Full-replace-on-poll, same pattern as pktIPAM's own arp_entries/
+    routes tables — each poll is a complete current-state snapshot."""
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute("DELETE FROM arp_entries WHERE device_id = ?", (device_id,))
+        for e in topology["arp"]:
+            await db.execute(
+                """INSERT OR IGNORE INTO arp_entries
+                   (device_id, ip_address, mac_address, interface_label, vlan_tag, last_seen)
+                   VALUES (?, ?, ?, ?, ?, datetime('now'))""",
+                (device_id, e["ip_address"], e["mac_address"], e["interface_label"], e.get("vlan_tag")),
+            )
+
+        await db.execute("DELETE FROM routes WHERE device_id = ?", (device_id,))
+        for r in topology["routes"]:
+            await db.execute(
+                """INSERT OR IGNORE INTO routes
+                   (device_id, destination, next_hop, interface_label, protocol, metric, last_seen)
+                   VALUES (?, ?, ?, ?, ?, ?, datetime('now'))""",
+                (device_id, r["destination"], r["next_hop"], r["interface_label"], r["protocol"], r["metric"]),
+            )
+
+        await db.execute("DELETE FROM interfaces WHERE device_id = ?", (device_id,))
+        for i in topology["interfaces"]:
+            await db.execute(
+                """INSERT OR IGNORE INTO interfaces
+                   (device_id, if_index, if_name, vlan_tag, last_seen)
+                   VALUES (?, ?, ?, ?, datetime('now'))""",
+                (device_id, i["if_index"], i.get("if_name"), i.get("vlan_tag")),
+            )
+
+        await db.commit()
 
 
 class PollEngine:
@@ -203,16 +379,19 @@ class PollEngine:
 
             # ifTable columns are indexed per-interface — resolve ifIndex -> ifDescr
             # once so those rows can be labeled, instead of GETting the bare column OID.
+            # Walked unconditionally (not just when the oid_catalog polls ifTable
+            # columns) since the topology walk below (ARP/routes/interfaces) needs
+            # interface labels regardless of what gauge/counter OIDs are configured.
             if_labels: dict[str, str] = {}
-            if any(o["oid"].startswith(IF_ENTRY_PREFIX) for o in polled_oids):
-                try:
-                    raw = await _walk_column(engine, auth_data, target, ctx, IFNAME_OID)
-                    if not raw:
-                        raw = await _walk_column(engine, auth_data, target, ctx, IFDESCR_OID)
-                    if_labels = {k: str(v) for k, v in raw.items()}
-                except Exception as e:
-                    log.debug(f"ifName/ifDescr walk failed for {device['ip']}: {e}")
+            try:
+                raw = await _walk_column(engine, auth_data, target, ctx, IFNAME_OID)
+                if not raw:
+                    raw = await _walk_column(engine, auth_data, target, ctx, IFDESCR_OID)
+                if_labels = {k: str(v) for k, v in raw.items()}
+            except Exception as e:
+                log.debug(f"ifName/ifDescr walk failed for {device['ip']}: {e}")
 
+            if any(o["oid"].startswith(IF_ENTRY_PREFIX) for o in polled_oids):
                 # ifAlias is the operator-assigned description (e.g. "WAN", "Guest VLAN") —
                 # not part of the gauge/counter catalog, so it needs its own walk to surface it.
                 try:
@@ -239,6 +418,14 @@ class PollEngine:
                         )
                 except Exception as e:
                     log.debug(f"ifAlias walk failed for {device['ip']}: {e}")
+
+            # ARP table, routing table, and per-port VLAN — independent of the
+            # oid_catalog, feeds the Suite Integration topology endpoints.
+            try:
+                topology = await _poll_topology(engine, auth_data, target, ctx, if_labels)
+                await _persist_topology(self._db_path, device["id"], topology)
+            except Exception as e:
+                log.warning(f"Topology poll (ARP/routes/interfaces) failed for {device['ip']}: {e}")
 
             for oid_entry in polled_oids:
                 oid_str = oid_entry["oid"]
