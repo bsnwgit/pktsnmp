@@ -14,7 +14,7 @@ import {
 import { useSearchParams } from 'react-router-dom'
 import {
   AreaChart, Area, XAxis, YAxis,
-  CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend,
+  CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, ReferenceDot, Legend,
 } from 'recharts'
 import {
   api,
@@ -61,6 +61,16 @@ const STATUS_RING: Record<string, string> = {
 const OID_GROUPS = {
   traffic: {
     label: 'Traffic',
+    // Deliberately the 32-bit counters, not the HC (64-bit) ones: on at least
+    // some devices, otelcol can't correlate the ifDescr attribute (from
+    // ifTable) across to ifXTable's HC metrics, so HC rows land under a raw
+    // ifIndex ('1'..'16') while every other interface metric — including the
+    // interface list this UI's sidebar is built from — uses ifDescr ('0/1'..
+    // '0/16'). Filtering to one interface can then never match the HC rows;
+    // they simply don't exist under that label. The 32-bit counters share the
+    // same labeling as everything else, so they're the only reliable choice
+    // per-interface. Wraparound (their actual weakness) is handled in
+    // computeRates() instead of avoided by switching counters.
     oids:  ['ifInOctets', 'ifOutOctets'] as const,
     color: ['#3b82f6', '#8b5cf6'],
     unit:  'bps',
@@ -132,6 +142,14 @@ const OID_GROUPS = {
   },
 } as const
 
+// Every OID any chart section actually renders — scopes the history fetch so
+// the backend doesn't have to bucket every OID type a device happens to report
+// (system/TCP/UDP stats, etc. that no chart here uses). On an interface-dense
+// device the interface-scoped OIDs alone (traffic/packets/errors) already
+// multiply out to a lot of rows once every port is counted; there's no reason
+// to also carry every unrelated scalar OID along for the ride.
+const ALL_METRIC_OIDS = [...new Set(Object.values(OID_GROUPS).flatMap(g => g.oids))].join(',')
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmt(n: number | null | undefined, unit = ''): string {
@@ -173,6 +191,13 @@ function tsShort(ms: number): string {
  * When the view is already scoped to one interface (or the OID is a scalar with
  * a single blank interface_label), this reduces to the original single-series behavior.
  */
+// 32-bit SNMP counters (ifInOctets/ifOutOctets and all packet/error/discard
+// counters — IF-MIB never defined 64-bit variants for those) wrap at 2^32.
+// A wrap only explains a decrease if the prior sample was near that boundary;
+// a decrease from a low value is a genuine counter reset (device reboot).
+const COUNTER32_MAX = 4294967296
+const NEAR_WRAP_THRESHOLD = COUNTER32_MAX * 0.9
+
 function computeRates(
   series: MetricPoint[],
   oid: string,
@@ -195,8 +220,11 @@ function computeRates(
       if (prev.max_value === null || row.max_value === null) continue
       const dt = (new Date(toUtc(row.bucket_ts)).getTime() - new Date(toUtc(prev.bucket_ts)).getTime()) / 1000
       if (dt <= 0) continue
-      const delta = row.max_value - prev.max_value
-      if (delta < 0) continue // counter reset
+      let delta = row.max_value - prev.max_value
+      if (delta < 0) {
+        if (prev.max_value < NEAR_WRAP_THRESHOLD) continue // genuine counter reset
+        delta += COUNTER32_MAX // recover the wrapped delta
+      }
       totals.set(row.bucket_ts, (totals.get(row.bucket_ts) ?? 0) + (delta * 8) / dt) // bits/sec
     }
   }
@@ -287,6 +315,60 @@ function groupHasData(data: Record<string, number | null>[], oids: readonly stri
   return data.length > 0 && data.some(r => oids.some(o => r[o] !== null))
 }
 
+// Midnight (local time) boundaries the visible data crosses — ticks alone
+// only show a repeating HH:MM, which is ambiguous once a chart spans more
+// than a day (7d view especially: the same few hour labels repeat 7 times
+// with nothing to tell the days apart).
+function dayBoundaries(data: Record<string, number | null>[]): number[] {
+  if (data.length < 2) return []
+  const first = data[0].ts as number
+  const last = data[data.length - 1].ts as number
+  const boundaries: number[] = []
+  const d = new Date(first)
+  d.setHours(24, 0, 0, 0) // first midnight strictly after `first`
+  while (d.getTime() < last) {
+    boundaries.push(d.getTime())
+    d.setDate(d.getDate() + 1)
+  }
+  return boundaries
+}
+
+function dayLabel(ms: number): string {
+  return new Date(ms).toLocaleDateString([], { month: 'short', day: 'numeric' })
+}
+
+const SEVERITY_RANK: Record<string, number> = { critical: 3, warning: 2, info: 1 }
+
+// A flapping/frequently-firing alert rule can generate hundreds of events in
+// a wide window (e.g. 145 in 7d) — one dashed line per event, drawn on every
+// chart section, packs so tightly they visually merge into a solid hatched
+// block rather than reading as distinct markers. Past ~a day and a half of
+// visible span (in practice: the 7d view) they stop being useful as markers
+// at all — drop them there and rely on the "Alert Events" list below the
+// charts instead. Below that threshold, collapse events landing in the same
+// small slice of the visible range into one (keeping the most severe), so
+// the marker count stays readable rather than scaling with event volume.
+const ALERT_MARKER_MAX_SPAN_MS = 36 * 3600 * 1000
+
+function dedupeAlertMarkers(
+  events: MetricsHistoryResponse['alert_events'],
+  data: Record<string, number | null>[],
+): MetricsHistoryResponse['alert_events'] {
+  if (events.length === 0 || data.length < 2) return events
+  const spanMs = (data[data.length - 1].ts as number) - (data[0].ts as number)
+  if (spanMs > ALERT_MARKER_MAX_SPAN_MS) return []
+  const bucketMs = Math.max(spanMs / 100, 60_000) // at most ~100 markers, never finer than 1 min
+  const byBucket = new Map<number, MetricsHistoryResponse['alert_events'][number]>()
+  for (const ae of events) {
+    const bucket = Math.round(new Date(toUtc(ae.fired_at)).getTime() / bucketMs) * bucketMs
+    const existing = byBucket.get(bucket)
+    if (!existing || (SEVERITY_RANK[ae.severity] ?? 0) > (SEVERITY_RANK[existing.severity] ?? 0)) {
+      byBucket.set(bucket, ae)
+    }
+  }
+  return [...byBucket.values()]
+}
+
 /**
  * Best-effort explanation for why a metric section has no data, shown under the
  * empty state. Driven entirely by this specific device's own polling history
@@ -370,7 +452,19 @@ function ChartSection({ title, data, oids, colors, unit, alertEvents = [], noDat
                 connectNulls={false}
               />
             ))}
-            {alertEvents.map(ae => (
+            {dayBoundaries(data).map(ts => (
+              <ReferenceLine
+                key={`day-${ts}`}
+                x={ts}
+                stroke="#4b5563"
+                strokeDasharray="3 3"
+                label={{
+                  value: dayLabel(ts), position: 'insideTopLeft',
+                  fill: '#f3f4f6', fontSize: 12, fontWeight: 700,
+                }}
+              />
+            ))}
+            {dedupeAlertMarkers(alertEvents, data).map(ae => (
               <ReferenceLine
                 key={ae.id}
                 x={alignTs(ae.fired_at)}
@@ -670,6 +764,7 @@ export default function MetricsPage() {
     api.getDeviceMetricsHistory(selectedDeviceId, {
       since,
       interface_label: selectedIfLabel ?? undefined,
+      oid_labels: ALL_METRIC_OIDS,
     })
       .then(setHistory)
       .catch(e => { if (e?.name !== 'AbortError') console.error(e) })
@@ -721,10 +816,16 @@ export default function MetricsPage() {
   }), [overviewCards])
 
   // Exclude hidden interfaces from the combined "All interfaces" totals — scalar
-  // rows (no interface_label) are device-wide metrics and are never hidden.
+  // rows (no interface_label) are device-wide metrics and are never hidden. Only
+  // applies to that combined view: a single interface's own detail page must
+  // show its data even if that interface was previously hidden elsewhere (e.g.
+  // reached directly via a restored/bookmarked URL), since the user is looking
+  // at exactly that interface on purpose.
   const series = useMemo(
-    () => (history?.series ?? []).filter(r => !r.interface_label || !hiddenIfaces.has(r.interface_label)),
-    [history, hiddenIfaces],
+    () => (history?.series ?? []).filter(
+      r => selectedIfLabel != null || !r.interface_label || !hiddenIfaces.has(r.interface_label)
+    ),
+    [history, hiddenIfaces, selectedIfLabel],
   )
   const chartData = useMemo(() => ({
     traffic:    buildTimeline(series, OID_GROUPS.traffic.oids,    true),
@@ -1101,15 +1202,17 @@ export default function MetricsPage() {
                   alertEvents={history?.alert_events}
                   noDataHint={getNoDataHint(OID_GROUPS.errors.oids, true, selectedCard.latest)}
                 />
-                <ChartSection
-                  title="IP / Protocol (receives, requests, TCP sessions, UDP)"
-                  data={chartData.ip}
-                  oids={OID_GROUPS.ip.oids}
-                  colors={OID_GROUPS.ip.color}
-                  unit="/s"
-                  alertEvents={history?.alert_events}
-                  noDataHint={getNoDataHint(OID_GROUPS.ip.oids, true, selectedCard.latest)}
-                />
+                {viewMode !== 'interface' && (
+                  <ChartSection
+                    title="IP / Protocol (receives, requests, TCP sessions, UDP)"
+                    data={chartData.ip}
+                    oids={OID_GROUPS.ip.oids}
+                    colors={OID_GROUPS.ip.color}
+                    unit="/s"
+                    alertEvents={history?.alert_events}
+                    noDataHint={getNoDataHint(OID_GROUPS.ip.oids, true, selectedCard.latest)}
+                  />
+                )}
                 {groupHasData(chartData.panTraffic, OID_GROUPS.panTraffic.oids) && (
                   <ChartSection
                     title="PAN-OS Interface Traffic (bits/sec)"
