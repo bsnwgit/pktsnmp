@@ -1583,7 +1583,7 @@ async def device_metrics_history(
     since: str | None = Query("1h", description="Relative: 1h|6h|24h|7d, or ISO datetime"),
     until: str | None = Query(None, description="ISO datetime upper bound (default: now)"),
     format: str | None = Query(None, description="'csv' to download as CSV"),
-    limit: int = Query(2000, ge=1, le=10000),
+    limit: int = Query(8000, ge=1, le=10000),
     if_index: int | None = Query(None, description="Legacy: ignored (oid column is NULL)"),
     interface_label: str | None = Query(None, description="Filter to a specific interface (ifDescr value)"),
 ) -> Any:
