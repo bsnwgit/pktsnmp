@@ -1800,6 +1800,51 @@ async def device_interfaces(
     return await get_storage().get_device_interfaces(device_id)
 
 
+@router.get("/devices/{device_id}/arp-entries")
+async def device_arp_entries(
+    device_id: int,
+    _: CurrentUser,
+    db: aiosqlite.Connection = Depends(get_db),
+) -> list[dict]:
+    """IP<->MAC bindings walked from this device's own ARP table
+    (ipNetToMediaTable, app/snmp/poll_engine.py::_poll_topology) — separate
+    from the metrics-derived /interfaces endpoint above. Read by sibling
+    apps (currently pktIPAM's pktsnmp_suite device collector) over the
+    Suite Integration channel instead of requiring their own direct SNMP
+    credentials to the same device."""
+    db.row_factory = aiosqlite.Row
+    async with db.execute("SELECT id FROM devices WHERE id=?", (device_id,)) as cur:
+        if not await cur.fetchone():
+            raise HTTPException(status_code=404, detail="Device not found")
+    async with db.execute(
+        "SELECT ip_address, mac_address, interface_label, vlan_tag, last_seen "
+        "FROM arp_entries WHERE device_id=? ORDER BY ip_address", (device_id,)
+    ) as cur:
+        rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+@router.get("/devices/{device_id}/routes")
+async def device_routes(
+    device_id: int,
+    _: CurrentUser,
+    db: aiosqlite.Connection = Depends(get_db),
+) -> list[dict]:
+    """This device's IPv4 routing table, walked via SNMP (ipCidrRouteTable,
+    app/snmp/poll_engine.py::_poll_topology). Read by sibling apps
+    (currently pktIPAM) over the Suite Integration channel."""
+    db.row_factory = aiosqlite.Row
+    async with db.execute("SELECT id FROM devices WHERE id=?", (device_id,)) as cur:
+        if not await cur.fetchone():
+            raise HTTPException(status_code=404, detail="Device not found")
+    async with db.execute(
+        "SELECT destination, next_hop, interface_label, protocol, metric, last_seen "
+        "FROM routes WHERE device_id=? ORDER BY destination", (device_id,)
+    ) as cur:
+        rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
 # =============================================================================
 # CLEANUP
 # =============================================================================
