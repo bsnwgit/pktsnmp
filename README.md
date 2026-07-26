@@ -429,7 +429,7 @@ The **Settings** page (admin-only nav item) is organized as top-level tabs, two 
 | **Data** | Storage | Time-series storage backend (SQLite/DuckDB/ClickHouse) |
 | | Backups | Backup schedule, retention, manual trigger |
 | **Notifications** | — | Slack/Email/PagerDuty/Webhook channel configuration |
-| **User Keys** | — | Per-user external API keys (ipinfo.io, AbuseIPDB, IPQualityScore) — see [Contextual Help & IP Intelligence](#contextual-help--ip-intelligence) |
+| **User Keys** | — | Per-user external API keys (ipinfo.io, ipapi.is, AbuseIPDB, MXToolbox, IPQualityScore) — see [Contextual Help & IP Intelligence](#contextual-help--ip-intelligence) |
 | **SNMP** | — | Trap receiver, local poll engine, and the SNMP Credential Library (see below) |
 | **Hierarchy** | — | Org / Group / Site / Location tree management and renaming |
 
@@ -740,10 +740,14 @@ Most pages (Dashboard, Metrics, Alerts, Logs, Collectors, Devices, OID Catalog, 
 
 Any IP address rendered in the app (device IPs, trap sources, log lines) is auto-linked — click it to open a lookup modal combining:
 
-- **ipinfo.io** — geolocation / ASN / org info
+- **ipinfo.io** — geolocation / ASN / org info, plus company, privacy (VPN/proxy/Tor/relay/hosting), abuse contact, and hosted-domains data on paid plans
+- **ipapi.is** — geolocation, ASN/org, company, abuse contact, VPN/proxy/Tor/datacenter/abuser detection — all in one call, no plan gating
 - **AbuseIPDB** — abuse confidence score and report history
+- **MXToolbox** — reverse DNS (PTR), ASN, and a blacklist/RBL check
 
-Private, loopback, link-local, reserved, and multicast addresses are rejected client- and server-side (nothing useful to look up). Each user supplies their **own** API key for each provider under **Settings → User Keys** — there is no shared/admin-wide key, and no admin override of another user's keys. If a key is missing, the modal shows which provider is unconfigured with a direct link to Settings → User Keys. A third provider slot, **IPQualityScore**, exists in the key-management API but is not yet wired into the combined lookup modal.
+Private, loopback, link-local, reserved, and multicast addresses are rejected client- and server-side (nothing useful to look up). Each user supplies their **own** API key for each provider under **Settings → User Keys** — there is no shared/admin-wide key, and no admin override of another user's keys. If a key is missing, the modal shows which provider is unconfigured with a direct link to Settings → User Keys. A fifth provider slot, **IPQualityScore**, exists in the key-management API but is not yet wired into the combined lookup modal.
+
+MXToolbox's other capabilities — SPF/DMARC/DKIM/MX/DNS/TXT/SOA/BIMI/MTA-STS/TLSRPT record checks, plus active probes (ping, traceroute, TCP/HTTP/HTTPS/SMTP connect) — are reachable via `POST /api/mxtoolbox/lookup` (`{command, argument, port?}`, using the same stored key) but aren't surfaced in the UI yet; that's backend-only reach for now.
 
 ---
 

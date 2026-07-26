@@ -407,7 +407,24 @@ class SQLiteStorage(StorageBase):
             params.extend(oid_labels)
 
         if interface_label is not None:
-            conditions.append("interface_label = ?")
+            # Device-wide scalars (ipInReceives, tcpCurrEstab, hrMemorySize, ...)
+            # are never tagged with any interface — they have interface_label
+            # IS NULL, which `interface_label = ?` excludes outright under SQL's
+            # NULL semantics. Scoping to one port would then hide these entirely
+            # any time an interface is selected, even though they aren't
+            # port-specific data to begin with. Keep them alongside that port's
+            # own rows rather than dropping them.
+            #
+            # HOST-RESOURCES-MIB per-core/per-volume metrics (hrProcessorLoad,
+            # hrStorageUsed) reuse this same column for their own hrDeviceIndex
+            # ('196608', '196609', ...) rather than NULL, since they're also
+            # indexed sub-values, just not network interfaces — same problem,
+            # different flavor. Recognize them explicitly so CPU/Storage charts
+            # don't go blank on an interface page either.
+            conditions.append(
+                "(interface_label = ? OR interface_label IS NULL "
+                "OR oid_label IN ('hrProcessorLoad', 'hrStorageUsed'))"
+            )
             params.append(interface_label)
 
         if since_iso:
@@ -419,47 +436,90 @@ class SQLiteStorage(StorageBase):
 
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
+        # `limit` bounds each individual (oid_label, interface_label) series, not
+        # the combined result — a single flat cap over everything gets exhausted
+        # by whichever device/interface/oid combination happens to sort first,
+        # starving every other series (a 50-interface device alone can produce
+        # thousands of rows per bucket once every interface-scoped OID is
+        # included, blowing through a several-thousand-row global cap within a
+        # couple of hours of a 24h/7d window). ROW_NUMBER() partitioned per
+        # series, ordered newest-first, guarantees every series keeps its own
+        # most-recent slice reaching "now" regardless of how many other series
+        # are present.
+        #
+        # `overall_cap` is deliberately generous (not `limit`, which is sized
+        # for a single series) — it's only a backstop against a truly
+        # pathological number of series, not a normal-case constraint. Sizing
+        # it near `limit` reintroduces the exact bug this replaces: it becomes
+        # a shared budget that a device with many interfaces/OIDs exhausts
+        # long before reaching the edge of the requested window, so the graph
+        # goes right back to silently stopping partway through.
+        per_series_cap = min(limit, 300)
+        overall_cap = 100_000
         if bucket_seconds and bucket_seconds > 0:
-            params.append(bucket_seconds)
-            params.append(bucket_seconds)
-            params.append(limit)
+            # The two bucket-math `?` placeholders appear in the SELECT clause,
+            # textually before the WHERE clause's placeholders — params must be
+            # supplied in that same order, not the order they were appended above.
+            all_params = [bucket_seconds, bucket_seconds] + params + [per_series_cap, overall_cap]
             sql = f"""
-                SELECT
-                    datetime(
-                        (CAST(strftime('%s', polled_at) AS INTEGER) / ?) * ?,
-                        'unixepoch'
-                    ) AS bucket_ts,
-                    oid_label,
-                    interface_label,
-                    AVG(value_numeric)  AS avg_value,
-                    MAX(value_numeric)  AS max_value,
-                    MIN(value_numeric)  AS min_value,
-                    COUNT(*)            AS sample_count
-                FROM snmp_poll_results
-                {where}
-                GROUP BY bucket_ts, oid_label, interface_label
-                ORDER BY bucket_ts ASC, oid_label ASC
+                WITH bucketed AS (
+                    SELECT
+                        datetime(
+                            (CAST(strftime('%s', polled_at) AS INTEGER) / ?) * ?,
+                            'unixepoch'
+                        ) AS bucket_ts,
+                        oid_label,
+                        interface_label,
+                        AVG(value_numeric)  AS avg_value,
+                        MAX(value_numeric)  AS max_value,
+                        MIN(value_numeric)  AS min_value,
+                        COUNT(*)            AS sample_count
+                    FROM snmp_poll_results
+                    {where}
+                    GROUP BY bucket_ts, oid_label, interface_label
+                ),
+                ranked AS (
+                    SELECT *, ROW_NUMBER() OVER (
+                        PARTITION BY oid_label, interface_label
+                        ORDER BY bucket_ts DESC
+                    ) AS rn
+                    FROM bucketed
+                )
+                SELECT bucket_ts, oid_label, interface_label, avg_value, max_value, min_value, sample_count
+                FROM ranked
+                WHERE rn <= ?
+                ORDER BY bucket_ts DESC, oid_label ASC
                 LIMIT ?
             """
         else:
-            params.append(limit)
+            all_params = params + [per_series_cap, overall_cap]
             sql = f"""
-                SELECT
-                    polled_at            AS bucket_ts,
-                    oid_label,
-                    interface_label,
-                    value_numeric        AS avg_value,
-                    value_numeric        AS max_value,
-                    value_numeric        AS min_value,
-                    1                    AS sample_count
-                FROM snmp_poll_results
-                {where}
-                ORDER BY polled_at ASC, oid_label ASC
+                WITH ranked AS (
+                    SELECT
+                        polled_at            AS bucket_ts,
+                        oid_label,
+                        interface_label,
+                        value_numeric        AS avg_value,
+                        value_numeric        AS max_value,
+                        value_numeric        AS min_value,
+                        1                    AS sample_count,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY oid_label, interface_label
+                            ORDER BY polled_at DESC
+                        ) AS rn
+                    FROM snmp_poll_results
+                    {where}
+                )
+                SELECT bucket_ts, oid_label, interface_label, avg_value, max_value, min_value, sample_count
+                FROM ranked
+                WHERE rn <= ?
+                ORDER BY bucket_ts DESC, oid_label ASC
                 LIMIT ?
             """
 
-        async with self._conn.execute(sql, params) as cur:
+        async with self._conn.execute(sql, all_params) as cur:
             rows = await cur.fetchall()
+        rows = list(reversed(rows))
         return [dict(r) for r in rows]
 
     async def get_ingest_rate(

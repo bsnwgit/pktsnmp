@@ -32,7 +32,6 @@ DEFAULTS: dict[str, Any] = {
     "snmp_trap_enabled": False,           # Enable SNMP trap receiver
     "snmp_trap_port": 162,                # UDP port to listen for SNMP traps
     "snmp_poll_enabled": False,           # Enable SNMP polling engine
-    "snmp_poll_interval_seconds": 300,    # Default polling interval
     "snmp_version": "v2c",               # v1 | v2c | v3
     "snmp_community": "public",          # SNMPv1/v2c community string
     "snmp_v3_username": "",              # SNMPv3 username
@@ -101,8 +100,8 @@ DEFAULTS: dict[str, Any] = {
     # Alerts
     "alert_event_retention_days": 90, # Days to keep alert_events + notification_log rows
 
-    "snmp_poll_default_interval_seconds": 60,
-    "snmp_poll_max_concurrency": 10,
+    "snmp_poll_default_interval_seconds": 60,  # Seconds between local poll cycles (read by poll_engine.py)
+    "snmp_poll_max_concurrency": 10,           # Max concurrent SNMP polls in flight
     "snmp_trap_bind_address": "0.0.0.0",
 
     # Backup
