@@ -1,9 +1,12 @@
 import { Component, Fragment, useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { api, getToken, User, UserIn, SslStatus, HierarchyOrg, HierarchyGroup, HierarchySite, HierarchyLocation, UserApiKey, Integration, IntegrationInput } from '../api/client'
 import { useAutoRefresh } from '../store/autoRefresh'
 import { useAuth } from '../store/auth'
 import HelpButton from '../components/HelpButton'
 import { copyToClipboard } from '../utils/clipboard'
+import Collectors from './Collectors'
+import OidCatalog from './OidCatalog'
 
 // ── Error boundary ────────────────────────────────────────────────────────────
 class TabErrorBoundary extends Component<{ children: React.ReactNode }, { err: Error | null }> {
@@ -388,7 +391,7 @@ function parseIdpMetadata(xml: string): {
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
-type TabId = 'general' | 'security' | 'data' | 'snmp' | 'notifications' | 'apikeys' | 'hierarchy'
+type TabId = 'general' | 'security' | 'data' | 'snmp' | 'notifications' | 'apikeys' | 'collectors' | 'oidcatalog' | 'hierarchy'
 
 const TABS: Array<{ id: TabId; label: string; adminOnly?: boolean; gapBefore?: boolean }> = [
   { id: 'general',       label: 'General' },
@@ -397,6 +400,8 @@ const TABS: Array<{ id: TabId; label: string; adminOnly?: boolean; gapBefore?: b
   { id: 'notifications', label: 'Notifications' },
   { id: 'apikeys',       label: 'User Keys' },
   { id: 'snmp',          label: 'SNMP', gapBefore: true },
+  { id: 'collectors',    label: 'Collectors' },
+  { id: 'oidcatalog',    label: 'OID Catalog' },
   { id: 'hierarchy',     label: 'Hierarchy', adminOnly: true },
 ]
 
@@ -686,7 +691,9 @@ function PktHubTokenDisplay() {
 export default function Settings() {
   const { user: me }          = useAuth()
   const isAdmin               = me?.role === 'admin'
-  const [tab, setTab]         = useState<TabId>('general')
+  const [searchParams]        = useSearchParams()
+  const initialTab            = searchParams.get('tab') as TabId | null
+  const [tab, setTab]         = useState<TabId>(initialTab && TABS.some(t => t.id === initialTab) ? initialTab : 'general')
   const [securityTab, setSecurityTab] = useState<SecurityTabId>(isAdmin ? 'users' : 'auth')
   const [dataTab, setDataTab] = useState<DataTabId>('storage')
   const [settings, setSettings] = useState<Settings>({})
@@ -1107,7 +1114,7 @@ export default function Settings() {
           help={{
             title: 'SNMP — How It Works',
             content: <>
-              <p>This tab only controls two things running <span className="text-gray-300 font-medium">on this server</span>: the trap receiver and the built-in local polling engine. <span className="text-gray-300 font-medium">Remote otelcol collectors are managed separately</span> under the Collectors nav item — they poll independently and aren't affected by anything here.</p>
+              <p>This tab only controls two things running <span className="text-gray-300 font-medium">on this server</span>: the trap receiver and the built-in local polling engine. <span className="text-gray-300 font-medium">Remote otelcol collectors are managed separately</span> under the Collectors tab — they poll independently and aren't affected by anything here.</p>
               <p><span className="text-gray-300 font-medium">Trap port 162</span> is the SNMP standard but needs root or <code className="text-gray-400">cap_net_bind_service</code> to bind — if the trap receiver won't start after enabling it, that's almost always why.</p>
               <p>Both settings on this tab <span className="text-amber-500 font-medium">require a service restart</span> to take effect — toggling or changing the interval here doesn't live-reconfigure the running poller.</p>
             </>,
@@ -1154,7 +1161,7 @@ export default function Settings() {
 
           <div className="py-4">
             <p className="text-xs text-blue-400 bg-blue-900/20 border border-blue-700/40 rounded-lg px-3 py-2">
-              Trap receiver and local polling engine settings only. Remote otelcol collectors operate independently and are managed under <span className="font-semibold">Collectors</span> in the left nav. Changes here take effect after a service restart.
+              Trap receiver and local polling engine settings only. Remote otelcol collectors operate independently and are managed under the <span className="font-semibold">Collectors</span> tab. Changes here take effect after a service restart.
             </p>
           </div>
 
@@ -1493,6 +1500,12 @@ export default function Settings() {
           lucidSave={lucidSave}
         />
       )}
+
+      {/* Collectors — remote otelcol collector management, moved here from the left nav */}
+      {tab === 'collectors' && <TabErrorBoundary><Collectors /></TabErrorBoundary>}
+
+      {/* OID Catalog */}
+      {tab === 'oidcatalog' && <TabErrorBoundary><OidCatalog /></TabErrorBoundary>}
 
       {/* Hierarchy tab — admin only */}
       {tab === 'hierarchy' && isAdmin && <TabErrorBoundary><HierarchyTab /></TabErrorBoundary>}
