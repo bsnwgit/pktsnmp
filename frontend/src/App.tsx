@@ -8,8 +8,6 @@ const Dashboard   = lazy(() => import('./pages/Dashboard'))
 const Alerts      = lazy(() => import('./pages/Alerts'))
 const Logs        = lazy(() => import('./pages/Logs'))
 const Settings    = lazy(() => import('./pages/Settings'))
-const Collectors  = lazy(() => import('./pages/Collectors'))
-const OidCatalog  = lazy(() => import('./pages/OidCatalog'))
 const Devices     = lazy(() => import('./pages/Devices'))
 const MetricsPage = lazy(() => import('./pages/MetricsPage'))
 
@@ -59,16 +57,8 @@ export default function App() {
               <Suspense fallback={<PageFallback />}><Settings /></Suspense>
             </AdminRoute>
           } />
-          <Route path="/collectors" element={
-            <ProtectedRoute>
-              <Suspense fallback={<PageFallback />}><Collectors /></Suspense>
-            </ProtectedRoute>
-          } />
-          <Route path="/oid-catalog" element={
-            <ProtectedRoute>
-              <Suspense fallback={<PageFallback />}><OidCatalog /></Suspense>
-            </ProtectedRoute>
-          } />
+          <Route path="/collectors" element={<Navigate to="/settings" replace />} />
+          <Route path="/oid-catalog" element={<Navigate to="/settings" replace />} />
           <Route path="/devices" element={
             <ProtectedRoute>
               <Suspense fallback={<PageFallback />}><Devices /></Suspense>
