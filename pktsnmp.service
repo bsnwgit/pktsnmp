@@ -8,7 +8,8 @@
 [Unit]
 Description=pktSNMP SNMP Ingest Management & Visualization Platform
 Documentation=https://github.com/bsnwgit/pktsnmp
-After=network.target
+After=network.target clickhouse-server.service
+Wants=clickhouse-server.service
 
 [Service]
 Type=simple

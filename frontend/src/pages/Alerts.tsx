@@ -738,9 +738,9 @@ function buildInvestigateUrl(event: AlertEvent): string {
   const windowMin: number = typeof d.window_min === 'number' ? d.window_min : 30
 
   // Collector-scoped alerts have no device to drill into — go to the
-  // Collectors page and highlight the specific one.
+  // Collectors tab in Settings and highlight the specific one.
   if (event.rule_type === 'collector_gap' && d.collector_id) {
-    return `/collectors?highlight=${d.collector_id}`
+    return `/settings?tab=collectors&highlight=${d.collector_id}`
   }
 
   // Trap-related alerts have no dedicated trap explorer in this app yet —
