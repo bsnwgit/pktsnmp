@@ -135,6 +135,74 @@ function RestartServiceRow() {
   )
 }
 
+// ── Snapshot files vary per backup (ClickHouse export can fail/be disabled),
+// so the checkbox set is derived from what's actually in that snapshot ──
+function SnapshotRestoreRow({ snapshot, onRestored }: {
+  snapshot: { name: string; path: string; size_bytes: number; files: string[] }
+  onRestored: (name: string, result: Record<string, string>) => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set(snapshot.files))
+  const [running, setRunning] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const toggle = (f: string) => {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(f)) next.delete(f); else next.add(f)
+      return next
+    })
+  }
+
+  const restore = async () => {
+    if (selected.size === 0) return
+    const which = selected.size === snapshot.files.length ? 'all files' : Array.from(selected).join(', ')
+    if (!window.confirm(`Restore ${which} from ${snapshot.name}?\n\nThis overwrites current data and cannot be undone.`)) return
+    setRunning(true)
+    setError(null)
+    try {
+      const result = await api.restoreSnapshot(snapshot.name, Array.from(selected))
+      onRestored(snapshot.name, result)
+      setExpanded(false)
+    } catch (e: any) {
+      setError(e.message || 'Restore failed')
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  return (
+    <div className="text-xs text-white">
+      <div className="flex items-center gap-3">
+        <span className="font-mono">{snapshot.name}</span>
+        <span className="text-white">{(snapshot.size_bytes / 1024 / 1024).toFixed(1)} MB</span>
+        <span className="text-white">{snapshot.files.join(', ')}</span>
+        <button onClick={() => setExpanded(v => !v)} className="text-blue-400 hover:text-blue-300 underline">
+          {expanded ? 'Cancel' : 'Restore…'}
+        </button>
+      </div>
+      {expanded && (
+        <div className="mt-2 mb-3 ml-4 space-y-2 bg-gray-800/60 rounded-lg p-3">
+          <p className="text-white">Choose which files to restore:</p>
+          <div className="flex flex-wrap gap-4">
+            {snapshot.files.map(f => (
+              <label key={f} className="flex items-center gap-1.5 cursor-pointer">
+                <input type="checkbox" checked={selected.has(f)} onChange={() => toggle(f)} className="accent-amber-600" />
+                <span className="font-mono">{f}</span>
+              </label>
+            ))}
+          </div>
+          <button onClick={restore} disabled={running || selected.size === 0}
+            className="bg-amber-700 hover:bg-amber-600 disabled:opacity-50 text-white text-xs rounded-lg px-3 py-1.5 transition-colors">
+            {running ? 'Restoring…' : 'Restore Selected'}
+          </button>
+          {error && <p className="text-red-400 mt-1">{error}</p>}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Port field — lives in config.yaml, not the SQLite-backed settings; value
 // is lifted to the parent so it saves through the General tab's one Save button ──
 function PortField({ value, onChange, loaded }: { value: number; onChange: (v: number) => void; loaded: boolean }) {
@@ -726,6 +794,11 @@ export default function Settings() {
   const num  = (k: string, fallback = 0)  => (settings[k] as number) ?? fallback
   const bool = (k: string, fallback = false) => (settings[k] as boolean) ?? fallback
 
+  // Set by pktHub when this app is registered there (POST /api/suite/settings-lock)
+  // Don't show the "remotely managed" lockout when pktHub itself is the one
+  // viewing this page (via the proxy embed) — only for a real direct visit.
+  const hubManaged = bool('hub_settings_managed', false) && me?.authProvider !== 'suite'
+
   // General tab's Port field lives in config.yaml (not the SQLite settings
   // blob) so it needs its own fetch, but saves through the same one button.
   const [portValue, setPortValue]   = useState(0)
@@ -798,6 +871,9 @@ export default function Settings() {
   const [backupResult, setBackupResult]     = useState<string | null>(null)
   const [backups, setBackups]               = useState<Array<{ name: string; path: string; size_bytes: number; files: string[] }>>([])
   const [backupsLoaded, setBackupsLoaded]   = useState(false)
+  const [snapshotRestoreResult, setSnapshotRestoreResult] = useState<{ name: string; result: Record<string, string> } | null>(null)
+  const ALL_BUNDLE_FILES = ['pktsnmp.db', 'config.yaml', 'snmp_data.csv.gz']
+  const [importFiles, setImportFiles]       = useState<Set<string>>(new Set(ALL_BUNDLE_FILES))
 
   const testConnection = async () => {
     setTestConnRunning(true)
@@ -856,7 +932,7 @@ export default function Settings() {
     setImportResult(null)
     setImportError(null)
     try {
-      const result = await api.importBundle(importFile)
+      const result = await api.importBundle(importFile, Array.from(importFiles))
       setImportResult(result)
     } catch (e: any) {
       setImportError(e.message || 'Import failed')
@@ -894,7 +970,7 @@ export default function Settings() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-bold text-white">Settings</h1>
+      <h1 className="text-xl font-bold text-white">pktSNMP - Settings</h1>
 
       {/* Tab bar */}
       <div className="flex items-center gap-1 bg-gray-900 border border-gray-800 rounded-xl p-1 w-fit overflow-x-auto">
@@ -912,6 +988,15 @@ export default function Settings() {
           </Fragment>
         ))}
       </div>
+
+      {hubManaged && (
+        <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-amber-800/40 bg-amber-900/20 text-amber-300 text-sm">
+          <span className="font-semibold">Remotely Managed</span>
+          <span className="text-amber-300/80">— this app is registered with pktHub, which now controls Settings. Make changes from pktHub instead.</span>
+        </div>
+      )}
+
+      <div className={hubManaged ? 'opacity-40 pointer-events-none select-none' : undefined}>
 
       {/* General */}
       {tab === 'general' && (
@@ -1270,6 +1355,7 @@ export default function Settings() {
               <p>A backup always includes the SQLite database (settings, devices, credentials, users, alert rules, hierarchy) and <code className="text-gray-400">config.yaml</code>. <span className="text-gray-300 font-medium">Include ClickHouse data</span> additionally exports SNMP data history — worth disabling if you only care about configuration, since data history is usually the largest part.</p>
               <p><span className="text-gray-300 font-medium">Rotation count</span> caps how many snapshots (scheduled or manual) stay on disk — the oldest is deleted automatically once you exceed it.</p>
               <p><span className="text-gray-300 font-medium">Export bundle</span> is a one-off download, separate from the rotation-managed snapshots above. <span className="text-amber-500 font-medium">Restore always requires a service restart</span> afterward for config changes in the bundle to apply.</p>
+              <p>Snapshots above can be restored directly from the server — no download/upload round trip needed. Both that and the bundle upload let you pick which files to restore instead of always restoring everything.</p>
             </>,
           }}
         >
@@ -1314,12 +1400,20 @@ export default function Settings() {
                   {backups.length === 0 ? (
                     <p className="text-xs text-white">No snapshots found.</p>
                   ) : backups.map(b => (
-                    <div key={b.name} className="flex items-center gap-3 text-xs text-white">
-                      <span className="font-mono">{b.name}</span>
-                      <span className="text-white">{(b.size_bytes / 1024 / 1024).toFixed(1)} MB</span>
-                      <span className="text-white">{b.files.join(', ')}</span>
-                    </div>
+                    <SnapshotRestoreRow key={b.name} snapshot={b} onRestored={(name, result) => setSnapshotRestoreResult({ name, result })} />
                   ))}
+                </div>
+              )}
+              {snapshotRestoreResult && (
+                <div className="text-xs space-y-1 bg-gray-800/60 rounded-lg p-3">
+                  <p className="text-white">Restored from {snapshotRestoreResult.name}:</p>
+                  {Object.entries(snapshotRestoreResult.result).map(([k, v]) => (
+                    <p key={k}>
+                      <span className="text-white">{k}:</span>{' '}
+                      <span className={v.startsWith('error') || v.startsWith('not found') ? 'text-red-400' : 'text-green-400'}>{v}</span>
+                    </p>
+                  ))}
+                  <p className="text-amber-400 mt-1">Restart the service to apply any config changes.</p>
                 </div>
               )}
             </div>
@@ -1349,10 +1443,27 @@ export default function Settings() {
                     }}
                   />
                 </label>
-                <button onClick={runImport} disabled={!importFile || importRunning}
+                <button onClick={runImport} disabled={!importFile || importRunning || importFiles.size === 0}
                   className="bg-amber-700 hover:bg-amber-600 disabled:opacity-50 text-white text-sm rounded-lg px-4 py-2 transition-colors">
                   {importRunning ? 'Restoring…' : 'Restore'}
                 </button>
+              </div>
+              <div className="flex flex-wrap gap-4 text-xs text-white">
+                {ALL_BUNDLE_FILES.map(f => (
+                  <label key={f} className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={importFiles.has(f)}
+                      onChange={() => setImportFiles(prev => {
+                        const next = new Set(prev)
+                        if (next.has(f)) next.delete(f); else next.add(f)
+                        return next
+                      })}
+                      className="accent-amber-600"
+                    />
+                    <span className="font-mono">{f}</span>
+                  </label>
+                ))}
               </div>
               {importError && <p className="text-xs text-red-400">{importError}</p>}
               {importResult && (
@@ -1509,6 +1620,7 @@ export default function Settings() {
 
       {/* Hierarchy tab — admin only */}
       {tab === 'hierarchy' && isAdmin && <TabErrorBoundary><HierarchyTab /></TabErrorBoundary>}
+      </div>
     </div>
   )
 }

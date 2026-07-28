@@ -85,6 +85,11 @@ DEFAULTS: dict[str, Any] = {
     "base_url": "http://localhost:8767",
     "timezone": "UTC",
 
+    # Set by pktHub on register/deregister (POST /api/suite/settings-lock) —
+    # not user-editable. Frontend shows a "remotely managed" banner and
+    # disables the local Settings UI when true.
+    "hub_settings_managed": False,
+
     # AI assistant
     "anthropic_api_key": "",          # Anthropic API key for in-app Claude assistant
     "ai_model": "claude-haiku-4-5-20251001",
