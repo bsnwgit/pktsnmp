@@ -41,7 +41,7 @@ Each script:
 6. Removes the previous SNMP pipeline exporter
 7. Validates the new config (`otelcol validate`)
 8. Restarts `otelcol.service`
-9. Prints the token (shown once — paste it into the Collectors page if needed)
+9. Prints the token (shown once — paste it into Settings → Collectors if needed)
 
 After running, otelcol still exports to its original destination for all non-SNMP pipelines. Only the SNMP pipelines are redirected.
 
@@ -80,7 +80,7 @@ exporters:
 
 > **Note:** otelcol automatically appends `/v1/metrics` to the endpoint, so the actual POST hits `/api/snmp/ingest/otlp/v1/metrics`. Both paths are registered server-side.
 
-Tokens can be rotated from the **Collectors** page (top-level nav, not under Settings) → **Rotate Token**, then re-run the relevant update script.
+Tokens can be rotated from the **Collectors** tab (**Settings → Collectors**) → **Rotate Token**, then re-run the relevant update script.
 
 ### Collector heartbeat
 
@@ -101,7 +101,7 @@ To add a device for local polling, go to the **Devices** page → **Add Device**
 
 ## Adding a New Collector
 
-1. Go to the **Collectors** page → **Add Collector**
+1. Go to **Settings → Collectors** → **Add Collector**
 2. Enter a name, description, and IP
 3. Copy the generated token — it is shown only once
 4. Install otelcol on the new host (or configure an existing instance)

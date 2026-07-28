@@ -24,6 +24,7 @@ SNMP ingest management and visualization platform — part of the pkt suite. Rec
 - [Roles & Auth](#roles--auth)
 - [Settings Layout](#settings-layout)
 - [SNMP Settings](#snmp-settings)
+- [Topology Data (ARP / Routes)](#topology-data-arp--routes)
 - [SSL/TLS](#ssltls)
 - [Alert Engine](#alert-engine)
 - [Device Hierarchy](#device-hierarchy)
@@ -262,9 +263,9 @@ Runs in-process on the pktSNMP host. Polls all devices assigned to `collector_id
 
 Existing OpenTelemetry Collector instances push OTLP HTTP JSON to pktSNMP.
 
-Multiple otelcol instances can be registered, each with a unique bearer token — generated and rotated on the **Collectors** page (top-level nav, not under Settings). See `docs/collector-setup.md` for the full redirect/registration walkthrough.
+Multiple otelcol instances can be registered, each with a unique bearer token — generated and rotated on the **Collectors** tab (**Settings → Collectors**). See `docs/collector-setup.md` for the full redirect/registration walkthrough.
 
-**Bulk import/export:** the Collectors and OID Catalog pages both have "Export CSV" / "Import CSV" / template-download buttons, for provisioning many collectors or a large OID set (a vendor MIB dump, a shared team catalog) at once instead of one at a time. Collector CSV import never accepts API tokens by value — each imported row gets its own freshly generated token, shown once in the import-result dialog, same as adding a single collector. Duplicate rows (by collector name / OID string) are skipped with a per-row message, not overwritten.
+**Bulk import/export:** the Collectors and OID Catalog tabs both have "Export CSV" / "Import CSV" / template-download buttons, for provisioning many collectors or a large OID set (a vendor MIB dump, a shared team catalog) at once instead of one at a time. Collector CSV import never accepts API tokens by value — each imported row gets its own freshly generated token, shown once in the import-result dialog, same as adding a single collector. Duplicate rows (by collector name / OID string) are skipped with a per-row message, not overwritten.
 
 **Minimal otelcol exporter block:**
 
@@ -340,10 +341,9 @@ All startup/infrastructure settings live in `config.yaml`. Runtime settings (sto
 | `snmp_trap_enabled` | Enable trap receiver |
 | `snmp_trap_port` | Trap UDP port (default 162) |
 | `snmp_poll_enabled` | Enable local poll engine |
-| `snmp_poll_interval_seconds` | The "Poll interval" field on Settings → SNMP — see caveat below |
+| `snmp_poll_default_interval_seconds` | The "Poll interval" field on Settings → SNMP (default `60`) |
+| `snmp_poll_max_concurrency` | The "Max concurrency" field on Settings → SNMP — max SNMP polls in flight at once (default `10`) |
 | `storage_backend` | `"sqlite"` (default) / `"duckdb"` / `"clickhouse"` — see [Database Backends](#database-backends), ClickHouse is not yet usable |
-
-> **Known bug — poll interval setting is disconnected from the poll engine.** The Settings → SNMP UI reads/writes `snmp_poll_interval_seconds` (default `300`), but `app/snmp/poll_engine.py` actually reads a *different* key, `snmp_poll_default_interval_seconds` (default `60`), which the UI never writes to. In practice, changing "Poll interval" in Settings has no effect on the running poll cadence — it stays at 60s unless `snmp_poll_default_interval_seconds` is edited directly in SQLite. There's also an unexposed `snmp_poll_max_concurrency` setting (default `10`) with no UI control at all. This needs a code fix (rename one key to match the other, or have the poll engine read the same key the UI writes) — flagged here since it's a real functional gap, not just a naming inconsistency.
 
 `snmp_version` / `snmp_community` / `snmp_v3_auth_key` / `snmp_v3_priv_key` still exist as legacy global settings keys in the schema, but nothing in the current trap receiver, poll engine, or otelcol-config code paths reads them anymore — SNMP credentials are resolved per-device or per-named-credential (see [SNMP Credential Library](#snmp-credential-library)) with hardcoded fallbacks (`v2c` / `public` / `noAuthNoPriv`), not from these settings. The Settings → SNMP tab no longer exposes them in the UI. Treat them as dead/vestigial rather than configuring against them.
 
@@ -391,7 +391,8 @@ Three roles: `admin`, `analyst`, `viewer`.
 |---|---|---|---|
 | View dashboard / alerts | ✓ | ✓ | ✓ |
 | Acknowledge alerts | ✓ | ✓ | — |
-| Manage devices / collectors | ✓ | ✓ | — |
+| Manage devices | ✓ | ✓ | — |
+| Manage collectors / OID catalog / credentials | ✓ | — | — |
 | Configure alert rules | ✓ | — | — |
 | Manage settings / users | ✓ | — | — |
 
@@ -431,22 +432,24 @@ The **Settings** page (admin-only nav item) is organized as top-level tabs, two 
 | **Notifications** | — | Slack/Email/PagerDuty/Webhook channel configuration |
 | **User Keys** | — | Per-user external API keys (ipinfo.io, ipapi.is, AbuseIPDB, MXToolbox, IPQualityScore) — see [Contextual Help & IP Intelligence](#contextual-help--ip-intelligence) |
 | **SNMP** | — | Trap receiver, local poll engine, and the SNMP Credential Library (see below) |
-| **Hierarchy** | — | Org / Group / Site / Location tree management and renaming |
+| **Collectors** | — | Remote otelcol collector registration, tokens, CSV import/export — see [Collector Setup](#collector-setup) |
+| **OID Catalog** | — | Bundled + custom OID/label mappings, CSV import/export |
+| **Hierarchy** | — | Org / Group / Site / Location tree management and renaming (admin-only) |
 
-**Devices** and **Collectors** are top-level nav items in their own right (alongside Dashboard, Metrics, Alerts, Logs, OID Catalog) — they are *not* under Settings, despite managing device/collector records that Settings features (credentials, hierarchy) reference.
+**SNMP**, **Collectors**, **OID Catalog**, and **Hierarchy** are the app-specific tabs, set off from the common tabs above them by a visual divider in the tab bar. Collectors and OID Catalog used to be their own top-level nav items; both moved into Settings as tabs. **Devices** remains a top-level nav item in its own right (alongside Dashboard, Metrics, Alerts, Logs) — it is *not* under Settings, despite managing device records that Settings features (credentials, hierarchy) reference.
 
 ---
 
 ## SNMP Settings
 
-Configure trap receiver and local poll engine via **Settings → SNMP** in the UI. This tab only controls what runs on this server — remote otelcol collectors are managed independently on the **Collectors** page and are unaffected by anything here.
+Configure trap receiver and local poll engine via **Settings → SNMP** in the UI. This tab only controls what runs on this server — remote otelcol collectors are managed independently on the **Settings → Collectors** tab and are unaffected by anything here.
 
 - **Trap receiver** — enable/disable, set UDP port (default 162). Restart service after changing port.
-- **Poll engine** — enable/disable, set default poll interval. Per-device intervals can override the default.
+- **Poll engine** — enable/disable, set default poll interval and max concurrent polls in flight. Per-device intervals can override the default.
 - **SNMP version** — global default (v1 / v2c / v3). Override per device or per named credential (see below).
 - **Community string** — used for v1/v2c devices without a per-device override.
 
-Both settings require a service restart to take effect — toggling or changing the interval doesn't live-reconfigure the running poller.
+Enabling/disabling the trap receiver or poll engine, and changing the trap port, poll interval, or max concurrency, all require a service restart to take effect — these don't live-reconfigure the running poller. Adding, editing, or deleting a **device** or **SNMP credential**, however, signals the running poll engine to reload its device list and credentials on its next cycle — no restart needed for those.
 
 ### SNMP Credential Library
 
@@ -457,6 +460,25 @@ Rather than entering SNMP credentials inline per device, admins maintain a named
 - Devices reference a credential by `credential_id` (**Devices → Add/Edit Device → Credential**) instead of storing their own copy
 - A credential in use by one or more devices cannot be deleted — the API rejects the delete and the UI shows which devices are attached
 - Both the local poll engine and the built-in trap/SNMP GET paths resolve the device's assigned credential at poll/lookup time — there's no separate "sync" step
+
+---
+
+## Topology Data (ARP / Routes)
+
+Alongside the regular gauge/counter metrics poll, the local poll engine also walks each local device's ARP table, IPv4 routing table, and per-port VLAN mapping every cycle:
+
+- **ARP** (`ipNetToMediaTable`) — IP↔MAC bindings per interface, with VLAN tag where resolvable (`dot1qPvid`/`dot1dBasePortIfIndex`)
+- **Routes** (`ipCidrRouteTable`) — destination CIDR, next hop, interface, protocol (`local`/`static`/`rip`/`ospf`/`bgp`/`eigrp`/`isis`/`other`), metric
+- **Interfaces** — `if_index`/`if_name`/VLAN tag, used to label the ARP and route rows above
+
+Each poll cycle fully replaces the prior data for that device (not accumulated history) in the `arp_entries`, `routes`, and `interfaces` tables. There is no dedicated Topology UI page in pktSNMP itself — this data is exposed read-only for sibling apps to consume over the Suite Integration channel:
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/snmp/devices/{id}/arp-entries` | ARP table for one device |
+| `GET` | `/api/snmp/devices/{id}/routes` | Routing table for one device |
+
+pktIPAM's `pktsnmp_suite` device collector is the current consumer — it uses these endpoints to enrich its own inventory with real MAC/interface/VLAN and route data pulled through pktSNMP's existing SNMP credentials, instead of requiring its own direct SNMP access to the same devices.
 
 ---
 
@@ -527,12 +549,12 @@ Supported notification channels: `inapp`, `email`, `slack`, `pagerduty`, `webhoo
 Every alert event card (Active and History) has an **Investigate ↗** button that deep-links straight to the relevant view for that rule, scoped to a time window around when it fired:
 
 - Device / interface / metric / threshold rules → **Metrics** page for that device, with the time range widened to comfortably cover the alert's evaluation window (1h/6h/24h/7d, picked automatically from the rule's window).
-- `collector_gap` → **Collectors** page, with the specific collector's row highlighted and scrolled into view (auto-clears after a few seconds).
+- `collector_gap` → **Settings → Collectors** tab, with the specific collector's row highlighted and scrolled into view (auto-clears after a few seconds).
 - Trap-related rules (`unknown_trap_source`, `trap_rate_spike`, `trap_oid_match`, `trap_received`) → **Dashboard**, since there's no dedicated trap explorer page yet — the Dashboard's recent-traps widget is the closest available view.
 
-### Application Logs pagination
+### Pagination
 
-The **Application Logs** page paginates server-side (50 rows/page) instead of loading everything at once. The page-number bar sits above the table: a sliding window of 5 page numbers that follows the current page (Next from page 5 jumps to 6-10, Prev works the same way in reverse), plus a `1 ..` shortcut back to the first page once you're past the first block, and a `.. N` shortcut to the last page. Changing any filter (level, logger, search, time range) resets back to page 1.
+**Alerts → Active**, **Alerts → History**, and the **Application Logs** page all paginate server-side instead of loading everything at once, each with its own page-size dropdown (25/50/75/100 rows, default 25 — Active and History track their page size independently). The page-number bar sits above the table: a sliding window of 5 page numbers that follows the current page (Next from page 5 jumps to 6-10, Prev works the same way in reverse), plus a `1 ..` shortcut back to the first page once you're past the first block, and a `.. N` shortcut to the last page. Changing any filter (level, logger, search, time range) or the page size resets back to page 1.
 
 ---
 
@@ -632,6 +654,10 @@ curl -X POST http://SERVER-IP:8767/api/system/backup -H "Authorization: Bearer T
 
 Backups are stored in `/opt/pktsnmp/backups/`.
 
+### Restore from the UI
+
+**Settings → Data → Backups** lists every on-server snapshot and lets you restore straight from it — no download/upload round trip required. Expanding a snapshot's **Restore…** link shows a checkbox per file it contains (`pktsnmp.db`, `config.yaml`, `snmp_data.csv.gz`), so you can restore just one piece (e.g. only the config) instead of always restoring everything together. The same per-file selection is available on **Restore from bundle** (uploading an exported `.tar.gz`). Every restore requires confirmation and, for `config.yaml` changes, a service restart to take effect.
+
 ### Manual backup
 
 ```bash
@@ -708,8 +734,9 @@ pktsnmp/
 │   └── main.py
 ├── frontend/
 │   └── src/
-│       ├── pages/    # Dashboard, Alerts, Settings, Login, Collectors, Devices, Logs, OidCatalog
-│       ├── components/  # Layout (nav + alert badge), AiAssistant
+│       ├── pages/    # Dashboard, Alerts, Settings, Login, Collectors, Devices, Logs, OidCatalog,
+│       │             # MetricsPage — Collectors/OidCatalog render as Settings tabs, not their own routes
+│       ├── components/  # Layout (nav + alert badge), AiAssistant, IpLink (external + internal IP lookup)
 │       ├── store/    # auth, autoRefresh
 │       └── api/      # typed API client (client.ts)
 ├── migrations/       # SQLite schema migrations (auto-applied at startup, append-only)
@@ -734,20 +761,31 @@ To add a new migration: create `migrations/NNN_your_change.sql` and restart the 
 
 ### App-wide contextual help
 
-Most pages (Dashboard, Metrics, Alerts, Logs, Collectors, Devices, OID Catalog, and every admin tab in Settings) have a **?** help button next to the page/section title. Clicking it opens an inline popover explaining what the page does and any non-obvious behavior (e.g. "changes here require a service restart"). This is static, bundled help content — no network call, no AI involved.
+Every page and admin tab (Dashboard, Metrics, Alerts, Logs, Devices, and every tab in Settings, including Collectors and OID Catalog) has a **?** help button next to the page/section title, except Login. Clicking it opens an inline popover explaining what the page does and any non-obvious behavior (e.g. "changes here require a service restart"). This is static, bundled help content — no network call, no AI involved.
 
 ### Per-user IP intelligence / reputation lookup
 
-Any IP address rendered in the app (device IPs, trap sources, log lines) is auto-linked — click it to open a lookup modal combining:
+Any IP address rendered in the app (device IPs, trap sources, log lines) is auto-linked — what clicking it opens depends on whether the address is public or private/internal (RFC 1918, loopback, or link-local).
+
+**Public IPs** open a lookup modal combining:
 
 - **ipinfo.io** — geolocation / ASN / org info, plus company, privacy (VPN/proxy/Tor/relay/hosting), abuse contact, and hosted-domains data on paid plans
 - **ipapi.is** — geolocation, ASN/org, company, abuse contact, VPN/proxy/Tor/datacenter/abuser detection — all in one call, no plan gating
 - **AbuseIPDB** — abuse confidence score and report history
 - **MXToolbox** — reverse DNS (PTR), ASN, and a blacklist/RBL check
 
-Private, loopback, link-local, reserved, and multicast addresses are rejected client- and server-side (nothing useful to look up). Each user supplies their **own** API key for each provider under **Settings → User Keys** — there is no shared/admin-wide key, and no admin override of another user's keys. If a key is missing, the modal shows which provider is unconfigured with a direct link to Settings → User Keys. A fifth provider slot, **IPQualityScore**, exists in the key-management API but is not yet wired into the combined lookup modal.
+Reserved and multicast addresses are rejected server-side (nothing useful to look up). Each user supplies their **own** API key for each provider under **Settings → User Keys** — there is no shared/admin-wide key, and no admin override of another user's keys. If a key is missing, the modal shows which provider is unconfigured with a direct link to Settings → User Keys. A fifth provider slot, **IPQualityScore**, exists in the key-management API but is not yet wired into the combined lookup modal.
 
 MXToolbox's other capabilities — SPF/DMARC/DKIM/MX/DNS/TXT/SOA/BIMI/MTA-STS/TLSRPT record checks, plus active probes (ping, traceroute, TCP/HTTP/HTTPS/SMTP connect) — are reachable via `POST /api/mxtoolbox/lookup` (`{command, argument, port?}`, using the same stored key) but aren't surfaced in the UI yet; that's backend-only reach for now.
+
+**Private/internal IPs** open a separate **"pktIPAM Lookup"** modal instead, sourced from a registered pktIPAM instance rather than an external provider:
+
+- **Inventory** — subnet, site, IP status, hostname, MAC address, owner, description
+- **DHCP lease** — state, hostname, MAC, lease end time
+- **DNS records** — matching A/PTR/etc. records
+- **Last seen (ARP)** — device, interface, and VLAN pktIPAM last saw that IP on
+
+This requires a pktIPAM connection configured under **Settings → Security → Suite Integration → Sibling pkt Apps** (see [Suite Integration](#suite-integration) below) — if none is configured, the modal shows a message and a link straight to that settings screen instead of an error. Reserved/multicast/malformed addresses fall through to the public-IP path above and get rejected there, same as before.
 
 ---
 
@@ -784,6 +822,12 @@ This removes the suite-token requirement, restores direct access, and logs the e
 ### Token rotation
 
 Use **Regen** in pktSNMP Settings → Security → Suite Integration to generate a new token. After regenerating, re-register in pktHub (the old token is immediately invalidated).
+
+### Sibling pkt Apps (outbound)
+
+The suite token above is *inbound* — it's how pktHub (or another pkt app) reaches into pktSNMP. **Settings → Security → Suite Integration → Sibling pkt Apps** is the reverse direction: named, outbound connections pktSNMP itself uses to call into another pkt app. Today the only sibling supported is **pktIPAM**, used exclusively to power the private/internal-IP lookup modal (see [Contextual Help & IP Intelligence](#contextual-help--ip-intelligence)).
+
+To configure: in pktIPAM, go to **Settings → Integrations → Suite Integration** and copy its suite token, then in pktSNMP add a connection under Sibling pkt Apps with pktIPAM's base URL and that token. Multiple named pktIPAM connections can be added; the first enabled one is used for lookups.
 
 ---
 

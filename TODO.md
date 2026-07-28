@@ -2,7 +2,7 @@
 
 Status key: ⬜ not started · 🔄 in progress · ✅ complete
 
-Last reconciled against `git log` and the current codebase 2026-07-20. Phases 1–6 below
+Last reconciled against `git log` and the current codebase 2026-07-27. Phases 1–6 below
 (the original build-out plan) are now **complete** — see the changelog at the bottom for
 what actually shipped, since a lot of the original phase descriptions undersold or
 predated what's really there now (hierarchy went to 5 levels, alert rule types grew to
@@ -23,21 +23,22 @@ feature documentation.
 ✅ Backup scheduler + export/import bundle
 ✅ systemd service definition (pktsnmp.service)
 ✅ React + TypeScript + Tailwind + Vite frontend
-✅ Settings page — General / Security (Users, Auth, Suite Integration, AI Assistant, SSL-TLS) / Data (Storage, Backups) / Notifications / User Keys / SNMP (incl. Credential Library) / Hierarchy — see README's "Settings Layout" section for the full current tab map
+✅ Settings page — General / Security (Users, Auth, Suite Integration, AI Assistant, SSL-TLS) / Data (Storage, Backups) / Notifications / User Keys / SNMP (incl. Credential Library) / Collectors / OID Catalog / Hierarchy — see README's "Settings Layout" section for the full current tab map (Collectors and OID Catalog moved from top-level nav into Settings tabs)
 ✅ Dashboard — environment hierarchy tree with live status rollup, recent traps/alerts widgets
 ✅ Alerts — 12 built-in rule types, custom rules, CSV import/export, Investigate deep-links
 ✅ AI Assistant panel (Claude, gated on `anthropic_api_key`, now under Settings → Security → AI Assistant)
 ✅ install.sh (Ubuntu bare-metal installer — interactive install-dir + port prompts)
 ✅ backup.py (local 2-rotation zip)
 ✅ App-wide contextual help (`?` popovers on nearly every page/tab)
-✅ Per-user IP intelligence / reputation lookup (ipinfo.io + AbuseIPDB, per-user keys under Settings → User Keys)
+✅ Per-user IP intelligence / reputation lookup for public IPs (ipinfo.io, ipapi.is, AbuseIPDB, MXToolbox — per-user keys under Settings → User Keys), plus a separate internal-IP lookup for private/RFC1918 addresses sourced from a registered pktIPAM instance (Settings → Security → Suite Integration → Sibling pkt Apps)
 
 ## Phase 2 — SNMP Engine (complete)
 
 ✅ **Trap receiver** — UDP listener on configured port (default 162), pysnmp-lextudio, v1/v2c/v3
 ✅ **Device registry** — full CRUD, 5-level hierarchy assignment (Org/Group/Site/Location/Device), HA role/peer, CSV import/export
-✅ **Polling engine** — asyncio poll loop; scalar OIDs via GET, ifTable-indexed OIDs via per-interface GETBULK walk; closes its SNMP engine after each device to avoid fd leaks; polls every catalog OID each cycle (no truncation)
+✅ **Polling engine** — asyncio poll loop; scalar OIDs via GET, ifTable-indexed OIDs via per-interface GETBULK walk; closes its SNMP engine after each device to avoid fd leaks; polls every catalog OID each cycle (no truncation); device/credential changes live-reload the running poller without a restart
 ✅ **OID catalog** — bundled common OIDs + custom OID/label mappings, CSV import/export, template download
+✅ **Topology collection** — ARP (`ipNetToMediaTable`), IPv4 routes (`ipCidrRouteTable`), and per-port VLAN walked alongside the regular metrics poll; full-replace per cycle into `arp_entries`/`routes`/`interfaces` tables; exposed read-only via `/api/snmp/devices/{id}/arp-entries` and `/routes` for sibling apps (currently pktIPAM) — no dedicated UI page in pktSNMP itself, see Phase 6
 
 ## Phase 3 — Storage Implementation
 
@@ -67,13 +68,12 @@ feature documentation.
 ⬜ Dark/light theme toggle — app is dark-theme only, no toggle exists
 ✅ CSV export of trap/poll and alert-rule data
 ✅ Per-device OID/metrics dashboard pages
-⬜ Topology view (still not started — low priority, as originally noted)
+⬜ Topology view — the underlying ARP/route/interface data is now collected and API-accessible (see Phase 2), but there's still no in-app UI page to browse it directly within pktSNMP; today it's only surfaced through the pktIPAM integration and the private-IP lookup modal
 
 ---
 
-## Known Gaps (as of 2026-07-20)
+## Known Gaps (as of 2026-07-27)
 
-- **Poll interval setting is disconnected from the poll engine (real bug, not just a doc gap).** Settings → SNMP writes `snmp_poll_interval_seconds`; `app/snmp/poll_engine.py` reads a different key, `snmp_poll_default_interval_seconds`, which the UI never writes to — so the poll cadence silently stays at the hardcoded 60s default regardless of what an admin sets in the UI. Needs a code fix: make both sides use the same setting key. There's also an `snmp_poll_max_concurrency` setting with no UI control at all.
 - **ClickHouse storage backend is unimplemented.** Selectable in Settings → Data → Storage but will raise on first ingest/query. Treat SQLite/DuckDB as the only real options.
 - **IPQualityScore** has a key-storage slot (Settings → User Keys) but isn't wired into the IP intelligence lookup modal yet — only ipinfo.io + AbuseIPDB are actually queried.
 - **SNMP raw-data retention cleanup is manual-trigger only** (no daily scheduled job like the alert-event cleanup has).
@@ -94,3 +94,8 @@ feature documentation.
 - Application Logs server-side pagination; alert Investigate deep-links
 - App-wide contextual help; per-user IP intelligence/reputation lookup
 - Suite Integration settings label renamed (was "pktHub Integration"); Copy-Token fixed on HTTP; Enter-to-submit added to login
+- Poll-interval setting reconnected to the poll engine (`snmp_poll_default_interval_seconds`/`snmp_poll_max_concurrency` now both UI-controlled and read by the poller); device/credential changes now live-reload the poller without a restart
+- ipapi.is and MXToolbox added as IP-intelligence providers alongside ipinfo.io/AbuseIPDB; separate private/internal-IP lookup added, sourced from a registered pktIPAM instance (subnet, DHCP lease, DNS records, ARP last-seen)
+- Alerts Active/History and Application Logs gained an independent page-size selector (25/50/75/100, default 25)
+- ARP table, IPv4 routing table, and per-port VLAN collection added to the local poll engine, exposed read-only for sibling apps over the Suite Integration channel
+- Collectors and OID Catalog moved from top-level nav pages into Settings tabs (alongside SNMP and Hierarchy); Collectors/OID Catalog management is now admin-only like the rest of Settings
