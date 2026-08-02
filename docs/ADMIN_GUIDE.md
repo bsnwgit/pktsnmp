@@ -71,7 +71,18 @@ Devices live under a five-level tree: **Org → Group → Site → Location → 
 
 ## Alert engine
 
-Runs as a background task, evaluating enabled rules every 60 seconds (15-second startup delay). Built-in rule types: `device_unreachable`, `interface_down`, `flapping`, `metric_threshold`, `metric_spike`, `error_rate`, `discard_rate`, `high_error_ratio`. Configure rules and severities under the Alerts area; wire up delivery channels under Notifications — enabling a channel there doesn't send anything on its own, it just makes it available for a rule to use. Each channel has a **Send Test** button that performs a real dispatch using whatever's currently filled in, even if unsaved.
+Runs as a background task, evaluating enabled rules every 60 seconds (15-second startup delay). Built-in rule types, grouped as they appear in the New Rule picker:
+
+| Group | Rule types |
+|---|---|
+| Device | Device down, Poll failure spike, Auth failure, Device poll gap |
+| Interface | Interface down, Interface flapping |
+| Metric | Metric threshold, Metric spike, Error rate, Discard rate, High error ratio, Bandwidth utilization, Interface speed change |
+| Trap | Unknown trap source, Trap rate spike, Trap OID match, Specific trap received |
+| Collector | Collector data gap |
+| Threshold | OID value threshold, OID missing |
+
+Configure rules and severities under the Alerts area; wire up delivery channels under Notifications — enabling a channel there doesn't send anything on its own, it just makes it available for a rule to use. Each channel has a **Send Test** button that performs a real dispatch using whatever's currently filled in, even if unsaved.
 
 ## Database backends
 

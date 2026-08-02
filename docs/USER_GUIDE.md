@@ -55,6 +55,8 @@ If the lookup modal shows fewer fields than you expect, it's because you haven't
 
 Every page and every Settings tab has a small **?** button near the title. Clicking it opens a short explanation of what that page does and any behavior that isn't obvious (for example, "this setting needs a service restart to take effect"). It's static built-in help, not a network call.
 
+For longer-form documentation, click **Documentation** in the sidebar (just above your account info) — it opens this guide and the Administrator Guide as in-app tabs, so you don't need the repo checked out to read them.
+
 ## Your account
 
 Click your username in the sidebar to change your own password. If your account uses SSO, password management is handled by your identity provider instead.
