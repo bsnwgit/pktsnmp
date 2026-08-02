@@ -130,6 +130,11 @@ export const api = {
     }),
 
   // ── System ────────────────────────────────────────────────────────────────
+  getSystemInfo: () =>
+    request<{
+      app_name: string; version: string; install_dir: string
+      github: string; license: string; developer: string; contact: string
+    }>('/system/info'),
   testStorageConnection: () =>
     request<{ ok: boolean; backend: string; message: string }>('/system/test-connection', { method: 'POST' }),
   getSuiteToken: () =>

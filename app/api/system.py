@@ -25,11 +25,27 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.config import get_settings
-from app.dependencies import require_admin
+from app.dependencies import require_admin, CurrentUser
 from app.storage.factory import get_storage
+from app.version import get_version
 
 log = logging.getLogger("pktsnmp.system")
 router = APIRouter()
+
+
+@router.get("/info")
+async def system_info(user: CurrentUser) -> dict:
+    """Version/about info shown on the Settings → System tab."""
+    cfg = get_settings()
+    return {
+        "app_name": "pktSNMP",
+        "version": get_version(),
+        "install_dir": cfg.install_dir,
+        "github": "https://github.com/bsnwgit/pktsnmp",
+        "license": "PolyForm Noncommercial 1.0.0",
+        "developer": "Robert Barnett",
+        "contact": "inquiry@barsoftnetware.com",
+    }
 
 
 async def _delayed_restart(delay: float = 1.5) -> None:
