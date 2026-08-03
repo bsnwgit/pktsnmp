@@ -26,7 +26,7 @@ feature documentation.
 ✅ Settings page — General / Security (Users, Auth, Suite Integration, AI Assistant, SSL-TLS) / Data (Storage, Backups) / Notifications / User Keys / SNMP (incl. Credential Library) / Collectors / OID Catalog / Hierarchy — see README's "Settings Layout" section for the full current tab map (Collectors and OID Catalog moved from top-level nav into Settings tabs)
 ✅ Dashboard — environment hierarchy tree with live status rollup, recent traps/alerts widgets
 ✅ Alerts — 12 built-in rule types, custom rules, CSV import/export, Investigate deep-links
-✅ AI Assistant panel (Claude, gated on `anthropic_api_key`, now under Settings → Security → AI Assistant)
+✅ AI Assistant panel — multi-provider (Settings → Security → AI Assistant): local/self-hosted (Ollama, or any OpenAI-compatible endpoint) tried first, then cloud (Anthropic); each provider independently enabled/disabled
 ✅ install.sh (Ubuntu bare-metal installer — interactive install-dir + port prompts)
 ✅ backup.py (local 2-rotation zip)
 ✅ App-wide contextual help (`?` popovers on nearly every page/tab)
