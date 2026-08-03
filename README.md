@@ -87,7 +87,7 @@ Setting `PKTSNMP_INSTALL_DIR` and/or `PKTSNMP_PORT` skips the corresponding inte
 │   ├── SNMP trap receiver  (UDP 162, asyncio)                 │
 │   ├── Local poll engine   (pysnmp, asyncio)                  │
 │   ├── Alert engine        (60s loop, fires + resolves)       │
-│   └── AI assistant        (Anthropic)                        │
+│   └── AI assistant        (Ollama/local, or Anthropic)       │
 │                                                              │
 │   SQLite  pktsnmp.db          ← settings, users, devices,    │
 │                                  collectors, alert rules,     │
@@ -425,7 +425,7 @@ The **Settings** page (admin-only nav item) is organized as top-level tabs, two 
 | **Security** | Users | User accounts, roles, password resets |
 | | Auth | Okta SAML 2.0 configuration |
 | | Suite Integration | Suite token, Copy Token, Regen, managed-mode status |
-| | AI Assistant | Anthropic API key for the AI Assistant panel |
+| | AI Assistant | AI provider config for the AI Assistant panel — local/self-hosted (Ollama, or any OpenAI-compatible endpoint) and cloud (Anthropic), each independently enabled/disabled; local providers are tried first |
 | | SSL / TLS | HTTPS enable/disable toggle, cert/key paths |
 | **Data** | Storage | Time-series storage backend (SQLite/DuckDB/ClickHouse) |
 | | Backups | Backup schedule, retention, manual trigger |
