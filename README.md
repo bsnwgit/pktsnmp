@@ -425,7 +425,7 @@ The **Settings** page (admin-only nav item) is organized as top-level tabs, two 
 | **Security** | Users | User accounts, roles, password resets |
 | | Auth | Okta SAML 2.0 configuration |
 | | Suite Integration | Suite token, Copy Token, Regen, managed-mode status |
-| | AI Assistant | AI provider config for the AI Assistant panel — local/self-hosted (Ollama, or any OpenAI-compatible endpoint) and cloud (Anthropic), each independently enabled/disabled; local providers are tried first |
+| | AI Assistant | AI provider config for the AI Assistant panel — local/self-hosted (Ollama, or any OpenAI-compatible endpoint) and cloud (Anthropic), each independently enabled/disabled; local providers are tried first. Scoped strictly to pktSNMP's own domain — off-topic questions and prompt-injection/override attempts are refused server-side before ever reaching the provider |
 | | SSL / TLS | HTTPS enable/disable toggle, cert/key paths |
 | **Data** | Storage | Time-series storage backend (SQLite/DuckDB/ClickHouse) |
 | | Backups | Backup schedule, retention, manual trigger |
