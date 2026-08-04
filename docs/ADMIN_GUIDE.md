@@ -45,7 +45,7 @@ Settings → Security → Auth:
 | Security | Users | Accounts, roles, password resets |
 | | Auth | Okta SAML configuration |
 | | Suite Integration | Suite token, pktHub registration status |
-| | AI Assistant | AI provider config for the in-app assistant — local/self-hosted (Ollama, or any OpenAI-compatible endpoint) and cloud (Anthropic), each with its own enable toggle; local providers are tried before cloud ones |
+| | AI Assistant | AI provider config for the in-app assistant — local/self-hosted (Ollama, or any OpenAI-compatible endpoint) and cloud (Anthropic), each with its own enable toggle; local providers are tried before cloud ones. Scoped strictly to pktSNMP's own domain — off-topic questions and prompt-injection/override attempts are refused server-side before ever reaching the provider |
 | | SSL / TLS | HTTPS toggle, cert/key upload |
 | Data | Storage | Time-series backend (SQLite/DuckDB/ClickHouse), storage stats |
 | | Backups | Schedule, retention, manual backup, restore |
