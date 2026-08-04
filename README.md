@@ -690,6 +690,8 @@ sudo systemctl start pktsnmp
 | Alert fires but dot still green | Alert engine evaluates every 60s; wait one cycle. If persists, check `devices.status` in SQLite directly |
 | Storage backend wrong on startup | `storage_backend` setting in SQLite takes effect on next restart; restart the service |
 | ClickHouse not found | Verify ClickHouse is running: `systemctl status clickhouse-server`; check credentials in `config.yaml` |
+| AI Assistant chat said "Not authenticated" | Fixed 2026-08-03 — the chat request wasn't sending the session's auth token, unrelated to Ollama/Anthropic/OpenAI settings. Update to the latest build if you still see this |
+| AI Assistant chat showed a blank provider error (e.g. `"Ollama error:"`) | Fixed 2026-08-03 — connection/timeout failures now name the provider and its base URL instead of an empty message |
 
 ---
 
