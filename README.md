@@ -160,7 +160,7 @@ Prompts for an install directory (default `/opt/pktsnmp`) and a port (default `8
 2. Creates the install directory and log directory
 3. Creates a Python virtualenv and installs `requirements.txt`
 4. Copies `app/` and `migrations/` into the install directory (skipped if installing in-place, i.e. the install directory is the repo checkout itself)
-5. Creates `config.yaml` from `config.example.yaml`, generating a random `secret_key` and pinning `install_dir` — every other on-disk path (`db_path`, `duckdb_path`, `log_file`, `ssl_dir`, backups) defaults to somewhere under `install_dir` unless explicitly overridden
+5. Creates `config.yaml` from `config.example.yaml`, generating a random `secret_key` and `credential_key` and pinning `install_dir` — every other on-disk path (`db_path`, `duckdb_path`, `log_file`, `ssl_dir`, backups) defaults to somewhere under `install_dir` unless explicitly overridden
 6. Applies database migrations and creates the initial `admin` user (prints the generated password once)
 7. Builds and deploys the frontend automatically if `npm` is on `PATH`; otherwise prints the exact manual build command to run afterward — see [Frontend Build & Deploy](#frontend-build--deploy)
 8. Installs and starts the `pktsnmp` systemd service (substituting install dir / log dir / user / group into the unit template)
@@ -324,6 +324,7 @@ All startup/infrastructure settings live in `config.yaml`. Runtime settings (sto
 | `port` | `8767` | HTTP port |
 | `workers` | `2` | uvicorn workers |
 | `secret_key` | — | JWT signing secret — **must change** |
+| `credential_key` | — | Fernet key encrypting stored secrets (user API keys) at rest — **must change**; generate with `python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
 | `install_dir` | detected at runtime | App root — pinned by `install.sh`; every path below defaults relative to this |
 | `db_path` | `<install_dir>/pktsnmp.db` | SQLite control-plane DB |
 | `duckdb_path` | `<install_dir>/snmp.duckdb` | DuckDB time-series file (if backend switched to DuckDB) |
@@ -776,7 +777,7 @@ Any IP address rendered in the app (device IPs, trap sources, log lines) is auto
 - **AbuseIPDB** — abuse confidence score and report history
 - **MXToolbox** — reverse DNS (PTR), ASN, and a blacklist/RBL check
 
-Reserved and multicast addresses are rejected server-side (nothing useful to look up). Each user supplies their **own** API key for each provider under **Settings → User Keys** — there is no shared/admin-wide key, and no admin override of another user's keys. If a key is missing, the modal shows which provider is unconfigured with a direct link to Settings → User Keys. A fifth provider slot, **IPQualityScore**, exists in the key-management API but is not yet wired into the combined lookup modal.
+Reserved and multicast addresses are rejected server-side (nothing useful to look up). Each user supplies their **own** API key for each provider under **Settings → User Keys** — there is no shared/admin-wide key, and no admin override of another user's keys. Keys are Fernet-encrypted at rest (`app/crypto.py`, using a dedicated `credential_key` — separate from `secret_key`, which only signs JWTs) — decrypted only in memory when a lookup runs or the owning user views their own key. If a key is missing, the modal shows which provider is unconfigured with a direct link to Settings → User Keys. A fifth provider slot, **IPQualityScore**, exists in the key-management API but is not yet wired into the combined lookup modal.
 
 MXToolbox's other capabilities — SPF/DMARC/DKIM/MX/DNS/TXT/SOA/BIMI/MTA-STS/TLSRPT record checks, plus active probes (ping, traceroute, TCP/HTTP/HTTPS/SMTP connect) — are reachable via `POST /api/mxtoolbox/lookup` (`{command, argument, port?}`, using the same stored key) but aren't surfaced in the UI yet; that's backend-only reach for now.
 
