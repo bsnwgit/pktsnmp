@@ -21,6 +21,13 @@ python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
 httpx>=0.27.0
 python3-saml>=1.16.0
+pyasn1<0.6.1,>=0.4.8  # pysnmp-lextudio 6.3.0 hard-requires <0.6.1 and still imports the
+                       # pyasn1.compat.octets shim removed in 0.6.4 - bumping past this
+                       # ceiling breaks every SNMP call at runtime (lazy-imported, so it
+                       # doesn't fail until the first poll, not at process start). The
+                       # pyasn1 CVEs this would have closed (PYSEC-2026-2263/3455/3456/3457)
+                       # stay open until pysnmp-lextudio ships a release compatible with a
+                       # newer pyasn1 - tracked as a known accepted risk, not fixed here.
 
 # Encryption (Fernet for v3 credentials)
 cryptography>=42.0.0

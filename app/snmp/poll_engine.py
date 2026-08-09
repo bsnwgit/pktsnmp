@@ -17,12 +17,9 @@ log = logging.getLogger("pktsnmp.snmp.poll_engine")
 
 def _decrypt(value: str) -> str:
     """Fernet-decrypt an SNMP credential key stored in SQLite."""
+    from app.crypto import decrypt_str
     try:
-        import base64
-        from cryptography.fernet import Fernet
-        from app.config import get_settings
-        key = get_settings().secret_key.encode()[:32].ljust(32, b"0")
-        return Fernet(base64.urlsafe_b64encode(key)).decrypt(value.encode()).decode()
+        return decrypt_str(value)
     except Exception:
         return ""
 
@@ -366,7 +363,8 @@ class PollEngine:
                     privProtocol=usmAesCfb128Protocol,
                 )
             else:
-                auth_data = CommunityData(device.get("community") or "public")
+                raw_community = device.get("community") or "public"
+                auth_data = CommunityData(_decrypt(raw_community) or raw_community)
 
             # Poll every catalog OID — vendor-specific / inapplicable ones just get a
             # fast noSuchObject/noSuchInstance response from the agent and are skipped
