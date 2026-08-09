@@ -3,7 +3,6 @@ SNMP API router -- credentials, collectors, devices, OID catalog, ingest, data q
 """
 from __future__ import annotations
 
-import base64
 import json
 import logging
 import secrets
@@ -25,20 +24,15 @@ _MASK = "••••••••"
 _V3_SECRET_FIELDS = {"auth_key_enc", "priv_key_enc"}
 
 
-def _get_fernet():
-    from cryptography.fernet import Fernet
-    from app.config import get_settings
-    key = get_settings().secret_key.encode()[:32].ljust(32, b"0")
-    return Fernet(base64.urlsafe_b64encode(key))
-
-
 def _encrypt(value: str) -> str:
-    return _get_fernet().encrypt(value.encode()).decode()
+    from app.crypto import encrypt_str
+    return encrypt_str(value)
 
 
 def _decrypt(value: str) -> str:
+    from app.crypto import decrypt_str
     try:
-        return _get_fernet().decrypt(value.encode()).decode()
+        return decrypt_str(value)
     except Exception:
         return ""
 
@@ -134,9 +128,12 @@ def _mask_collector(collector: dict) -> dict:
     return d
 
 
+_DEVICE_SECRET_FIELDS = _V3_SECRET_FIELDS | {"device_community"}
+
+
 def _mask_device(device: dict) -> dict:
     d = dict(device)
-    for field in _V3_SECRET_FIELDS:
+    for field in _DEVICE_SECRET_FIELDS:
         if d.get(field):
             d[field] = _MASK
     return d
@@ -324,13 +321,14 @@ async def get_credential(cred_id: int, _: CurrentUser, db: aiosqlite.Connection 
 async def create_credential(body: CredentialCreate, _: AdminUser, db: aiosqlite.Connection = Depends(get_db)) -> dict:
     auth_key_enc = _encrypt(body.auth_key) if (body.auth_key and body.auth_key != _MASK) else None
     priv_key_enc = _encrypt(body.priv_key) if (body.priv_key and body.priv_key != _MASK) else None
+    community_enc = _encrypt(body.community) if body.community else body.community
     try:
         async with db.execute(
             """INSERT INTO snmp_credentials
                 (name, description, snmp_version, community, security_name, security_level,
                  auth_protocol, auth_key_enc, priv_protocol, priv_key_enc)
                VALUES (?,?,?,?,?,?,?,?,?,?) RETURNING id""",
-            (body.name, body.description, body.snmp_version, body.community,
+            (body.name, body.description, body.snmp_version, community_enc,
              body.security_name, body.security_level, body.auth_protocol, auth_key_enc,
              body.priv_protocol, priv_key_enc),
         ) as cur:
@@ -363,6 +361,8 @@ async def update_credential(cred_id: int, body: CredentialUpdate, _: AdminUser, 
     # community is masked in GET responses — only update if a real value was sent
     if "community" in updates and updates["community"] == _MASK:
         updates.pop("community")
+    elif "community" in updates and updates["community"]:
+        updates["community"] = _encrypt(updates["community"])
     d.update(updates)
     await db.execute(
         """UPDATE snmp_credentials SET name=?, description=?, snmp_version=?, community=?,
@@ -731,7 +731,12 @@ async def _load_devices_for_push(collector_id: int, db: aiosqlite.Connection) ->
     result = []
     for row in rows:
         d = dict(row)
-        # Decrypt SNMP auth/priv keys for otelcol config generation
+        # Decrypt SNMP community + auth/priv keys for otelcol config generation
+        if d.get("community"):
+            try:
+                d["community"] = _decrypt(d["community"]) or d["community"]
+            except Exception:
+                pass
         if d.get("auth_key_enc"):
             try:
                 d["auth_key"] = _decrypt(d["auth_key_enc"])
@@ -793,7 +798,7 @@ async def list_devices(
     sql = f"{_DEVICE_SELECT} {where} ORDER BY d.id"
     async with db.execute(sql, params) as cur:
         rows = await cur.fetchall()
-    return [dict(r) for r in rows]
+    return [_mask_device(dict(r)) for r in rows]
 
 
 @router.get("/devices/tree")
@@ -1101,7 +1106,7 @@ async def get_device(device_id: int, _: CurrentUser, db: aiosqlite.Connection = 
         row = await cur.fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Device not found")
-    return dict(row)
+    return _mask_device(dict(row))
 
 
 @router.post("/devices", status_code=201)
@@ -1229,7 +1234,12 @@ async def test_device(device_id: int, _: AnalystUser, db: aiosqlite.Connection =
             auth_data = UsmUserData(device.get("security_name") or "", authKey=auth_key, privKey=priv_key,
                                      authProtocol=auth_proto, privProtocol=usmAesCfb128Protocol)
         else:
-            auth_data = CommunityData(device.get("community") or "public")
+            community = device.get("community") or "public"
+            try:
+                community = _decrypt(community) or community
+            except Exception:
+                pass
+            auth_data = CommunityData(community)
         start = time.monotonic()
         error_indication, error_status, _, var_binds = await getCmd(
             engine, auth_data, target, ctx, ObjectType(ObjectIdentity("1.3.6.1.2.1.1.1.0")),
