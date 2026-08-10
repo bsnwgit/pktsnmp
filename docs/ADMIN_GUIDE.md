@@ -39,18 +39,32 @@ Settings → Security → Auth:
 
 ## Settings reference
 
+Settings is split into two sections, picked from a section bar above the tab
+bar: **Common** (shared by every pkt* app) and **pktSNMP** (this app's own).
+The tab bar shows one section's tabs at a time. Deep links like
+`/settings?tab=hierarchy` still land on the right tab — the section follows
+automatically.
+
+### Common section
+
 | Tab | Sub-tab | What it controls |
 |---|---|---|
 | General | — | App name, `base_url`, timezone, Restart Service button |
 | Security | Users | Accounts, roles, password resets |
 | | Auth | Okta SAML configuration |
 | | Suite Integration | Suite token, pktHub registration status |
-| | AI Assistant | AI provider config for the in-app assistant — local/self-hosted (Ollama, or any OpenAI-compatible endpoint) and cloud (Anthropic), each with its own enable toggle; local providers are tried before cloud ones. Scoped strictly to pktSNMP's own domain — off-topic questions and prompt-injection/override attempts are refused server-side before ever reaching the provider |
+| | AI Assistant | AI provider config for the in-app assistant — local/self-hosted (Ollama, or any OpenAI-compatible endpoint) and cloud (Anthropic), each with its own enable toggle; local providers are tried before cloud ones. Scoped strictly to pktSNMP's own domain — off-topic questions and prompt-injection/override attempts are refused server-side before ever reaching the provider. A provider gets up to 180 seconds to answer before the request is failed — sized for slow local models, not cloud ones |
 | | SSL / TLS | HTTPS toggle, cert/key upload |
 | Data | Storage | Time-series backend (SQLite/DuckDB/ClickHouse), storage stats |
 | | Backups | Schedule, retention, manual backup, restore |
 | Notifications | — | Slack / Email / PagerDuty / Webhook / TraceCat channels |
 | User Keys | — | Per-user external lookup API keys (ipinfo.io, ipapi.is, AbuseIPDB, MXToolbox, IPQualityScore) |
+| System | — | Version/build info, host and runtime details, open-source notices |
+
+### pktSNMP section
+
+| Tab | Sub-tab | What it controls |
+|---|---|---|
 | SNMP | — | Trap receiver, poll engine, SNMP Credential Library |
 | Collectors | — | Remote otelcol collector registration + tokens, CSV import/export |
 | OID Catalog | — | OID/label mappings, CSV import/export |

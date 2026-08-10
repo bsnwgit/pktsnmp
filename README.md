@@ -418,7 +418,14 @@ Configure in **Settings → Security → Auth**:
 
 ## Settings Layout
 
-The **Settings** page (admin-only nav item) is organized as top-level tabs, two of which have their own nested sub-tabs:
+The **Settings** page (admin-only nav item) is organized into two top-level
+**sections**, chosen from a section bar above the tab bar: **Common** (the
+settings every pkt* app shares) and **pktSNMP** (this app's own settings).
+Picking a section swaps the tab bar underneath it to that section's tabs, so
+you only ever see one group at a time. Two tabs have their own nested
+sub-tabs.
+
+### Common
 
 | Tab | Sub-tab | Contents |
 |---|---|---|
@@ -426,18 +433,24 @@ The **Settings** page (admin-only nav item) is organized as top-level tabs, two 
 | **Security** | Users | User accounts, roles, password resets |
 | | Auth | Okta SAML 2.0 configuration |
 | | Suite Integration | Suite token, Copy Token, Regen, managed-mode status |
-| | AI Assistant | AI provider config for the AI Assistant panel — local/self-hosted (Ollama, or any OpenAI-compatible endpoint) and cloud (Anthropic), each independently enabled/disabled; local providers are tried first. Scoped strictly to pktSNMP's own domain — off-topic questions and prompt-injection/override attempts are refused server-side before ever reaching the provider |
+| | AI Assistant | AI provider config for the AI Assistant panel — local/self-hosted (Ollama, or any OpenAI-compatible endpoint) and cloud (Anthropic), each independently enabled/disabled; local providers are tried first. Scoped strictly to pktSNMP's own domain — off-topic questions and prompt-injection/override attempts are refused server-side before ever reaching the provider. Each provider call is allowed up to **180 seconds** to respond — local models on modest hardware can take well over a minute on a complex question, and a shorter ceiling just turned those into spurious failures |
 | | SSL / TLS | HTTPS enable/disable toggle, cert/key paths |
 | **Data** | Storage | Time-series storage backend (SQLite/DuckDB/ClickHouse) |
 | | Backups | Backup schedule, retention, manual trigger |
 | **Notifications** | — | Slack/Email/PagerDuty/Webhook channel configuration |
 | **User Keys** | — | Per-user external API keys (ipinfo.io, ipapi.is, AbuseIPDB, MXToolbox, IPQualityScore) — see [Contextual Help & IP Intelligence](#contextual-help--ip-intelligence) |
+| **System** | — | Version/build info, host and runtime details, open-source notices |
+
+### pktSNMP
+
+| Tab | Sub-tab | Contents |
+|---|---|---|
 | **SNMP** | — | Trap receiver, local poll engine, and the SNMP Credential Library (see below) |
 | **Collectors** | — | Remote otelcol collector registration, tokens, CSV import/export — see [Collector Setup](#collector-setup) |
 | **OID Catalog** | — | Bundled + custom OID/label mappings, CSV import/export |
 | **Hierarchy** | — | Org / Group / Site / Location tree management and renaming (admin-only) |
 
-**SNMP**, **Collectors**, **OID Catalog**, and **Hierarchy** are the app-specific tabs, set off from the common tabs above them by a visual divider in the tab bar. Collectors and OID Catalog used to be their own top-level nav items; both moved into Settings as tabs. **Devices** remains a top-level nav item in its own right (alongside Dashboard, Metrics, Alerts, Logs) — it is *not* under Settings, despite managing device records that Settings features (credentials, hierarchy) reference.
+**SNMP**, **Collectors**, **OID Catalog**, and **Hierarchy** are the app-specific tabs. They previously sat in the same tab row as the common tabs, separated only by a thin divider; they now live behind the **pktSNMP** section button instead. Deep links still work unchanged — `/settings?tab=collectors` selects the right section automatically. Collectors and OID Catalog used to be their own top-level nav items; both moved into Settings as tabs. **Devices** remains a top-level nav item in its own right (alongside Dashboard, Metrics, Alerts, Logs) — it is *not* under Settings, despite managing device records that Settings features (credentials, hierarchy) reference.
 
 ---
 
@@ -693,6 +706,7 @@ sudo systemctl start pktsnmp
 | ClickHouse not found | Verify ClickHouse is running: `systemctl status clickhouse-server`; check credentials in `config.yaml` |
 | AI Assistant chat said "Not authenticated" | Fixed 2026-08-03 — the chat request wasn't sending the session's auth token, unrelated to Ollama/Anthropic/OpenAI settings. Update to the latest build if you still see this |
 | AI Assistant chat showed a blank provider error (e.g. `"Ollama error:"`) | Fixed 2026-08-03 — connection/timeout failures now name the provider and its base URL instead of an empty message |
+| AI Assistant says the provider "didn't finish responding within 180s" | The provider was reachable but too slow. Common with a large local model on CPU-only hardware. Ask a shorter/simpler question, use a smaller model, or give the Ollama host more resources. Cloud providers rarely approach this ceiling — if Anthropic hits it, suspect the network path rather than the model |
 
 ---
 
