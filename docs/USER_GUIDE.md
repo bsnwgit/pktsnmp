@@ -51,6 +51,10 @@ Anywhere an IP address appears in the app (a device's IP, a trap source, a log l
 
 If the lookup modal shows fewer fields than you expect, it's because you haven't added an API key for that provider yet — this is optional and only affects your own account.
 
+## Finding a setting
+
+The Settings page has a section bar at the top with two buttons: **Common** and **pktSNMP**. Common holds the settings that look the same in every pkt* app (General, Security, Data, Notifications, User Keys, System); pktSNMP holds this app's own (SNMP, Collectors, OID Catalog, Hierarchy). The row of tabs below the section bar shows only the section you've selected, so if a tab you're looking for isn't there, switch sections. Links that point straight at a tab still work — they select the correct section for you.
+
 ## Getting help in the app
 
 Every page and every Settings tab has a small **?** button near the title. Clicking it opens a short explanation of what that page does and any behavior that isn't obvious (for example, "this setting needs a service restart to take effect"). It's static built-in help, not a network call.
