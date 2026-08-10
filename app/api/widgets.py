@@ -7,6 +7,8 @@ Options:  GET /api/widgets/options/* → JSON [{value,label}] for dynamic param 
 """
 from __future__ import annotations
 
+import html
+
 import aiosqlite
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -88,7 +90,7 @@ def _status_badge(status: str) -> str:
         return '<span class="badge br">DOWN</span>'
     if s in ("degraded", "warning"):
         return '<span class="badge by">DEGRADED</span>'
-    return f'<span class="badge bn">{(status or "UNKNOWN").upper()}</span>'
+    return f'<span class="badge bn">{html.escape((status or "UNKNOWN").upper())}</span>'
 
 
 # ── Device Status widget ─────────────────────────────────────────────────────
@@ -108,7 +110,8 @@ async def widget_device_status():
 
     if rows:
         trs = "".join(
-            f"<tr><td>{r['name']}</td><td>{r['ip']}</td><td>{r.get('site') or ''}</td>"
+            f"<tr><td>{html.escape(str(r['name']))}</td><td>{html.escape(str(r['ip']))}</td>"
+            f"<td>{html.escape(str(r.get('site') or ''))}</td>"
             f"<td>{_status_badge(r['status'])}</td></tr>"
             for r in rows
         )
@@ -146,19 +149,19 @@ async def widget_interface_status(device_id: int | None = None):
 
     if ifaces:
         trs = "".join(
-            f"<tr><td>{i['name']}</td>"
+            f"<tr><td>{html.escape(str(i['name']))}</td>"
             f"<td>{_status_badge(i.get('oper_status'))}</td>"
             f"<td>{_status_badge(i.get('admin_status'))}</td>"
             f"<td>{(str(round(i['speed_mbps'])) + ' Mbps') if i.get('speed_mbps') else '—'}</td></tr>"
             for i in ifaces
         )
         body = (
-            f'<div style="margin-bottom:8px;color:#64748b;font-size:11px">{device_name}</div>'
+            f'<div style="margin-bottom:8px;color:#64748b;font-size:11px">{html.escape(str(device_name))}</div>'
             "<table><thead><tr><th>Interface</th><th>Oper</th><th>Admin</th><th>Speed</th></tr></thead>"
             f"<tbody>{trs}</tbody></table>"
         )
     else:
-        body = f'<div class="empty">No interface data for {device_name}</div>'
+        body = f'<div class="empty">No interface data for {html.escape(str(device_name))}</div>'
     return HTMLResponse(_page("Interface Status", body))
 
 
@@ -182,8 +185,9 @@ async def widget_active_alerts():
     if rows:
         trs = "".join(
             f"<tr><td>{_status_badge('down' if r['severity'] in ('critical','high') else 'degraded')}</td>"
-            f"<td>{r.get('device_name') or ''}</td><td>{r['message']}</td>"
-            f"<td>{str(r['fired_at'])[:19].replace('T',' ')}</td></tr>"
+            f"<td>{html.escape(str(r.get('device_name') or ''))}</td>"
+            f"<td>{html.escape(str(r['message']))}</td>"
+            f"<td>{html.escape(str(r['fired_at'])[:19].replace('T',' '))}</td></tr>"
             for r in rows
         )
         body = (
