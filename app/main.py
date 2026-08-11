@@ -75,6 +75,15 @@ async def lifespan(app: FastAPI):
     await cleanup.start()
     log.info("Alert cleanup started")
 
+    # Start time-series retention. The backends have always implemented
+    # run_cleanup() and Settings has always exposed retention_days_raw, but
+    # nothing called it — poll results accumulated forever regardless of the
+    # configured retention. This is what makes that setting real.
+    from app.storage.retention import StorageRetention
+    retention = StorageRetention()
+    await retention.start()
+    log.info("Storage retention started")
+
     # Start backup scheduler
     from app.backup import BackupScheduler
     backup_scheduler = BackupScheduler()
@@ -103,6 +112,7 @@ async def lifespan(app: FastAPI):
         await app.state.local_collector.stop()
     await engine.stop()
     await cleanup.stop()
+    await retention.stop()
     await backup_scheduler.stop()
     from app.storage.factory import close_storage
     await close_storage()

@@ -554,21 +554,36 @@ function TrapFlux({ timeline, total }: { timeline: Array<{ hour: string; count: 
       {pts.length === 0 ? (
         <div className="h-[54px] grid place-items-center f-lbl">No trap activity</div>
       ) : (
-        <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
-          <defs>
-            <linearGradient id="fluxfade" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="rgba(126,207,226,.28)" />
-              <stop offset="100%" stopColor="rgba(126,207,226,0)" />
-            </linearGradient>
-          </defs>
-          <path d={area} fill="url(#fluxfade)" />
-          <path d={line} fill="none" stroke="#8ad8ea" strokeWidth="1" opacity=".85" />
-          <circle
-            cx={(peakIdx * step).toFixed(1)}
-            cy={(H - (pts[peakIdx].count / max) * (H - 8)).toFixed(1)}
-            r="2" fill="#8ad8ea"
-          />
-        </svg>
+        <InstrumentFrame height={H + 10} ticks={36} live>
+          <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="fluxfade" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="rgba(138,216,234,.30)" />
+                <stop offset="100%" stopColor="rgba(138,216,234,0)" />
+              </linearGradient>
+            </defs>
+            {/* survey rules — recessive, horizontal only */}
+            {[0.25, 0.5, 0.75].map(f => (
+              <line key={f} x1="0" x2={W} y1={H * f} y2={H * f}
+                    stroke="rgba(216,180,110,.22)" strokeDasharray="1 5" />
+            ))}
+            <path d={area} fill="url(#fluxfade)" />
+            <path d={line} fill="none" stroke={INSTRUMENT.ice} strokeWidth="1.4"
+                  style={glow(INSTRUMENT.ice, 5)} />
+            {/* peak marker */}
+            <circle
+              cx={(peakIdx * step).toFixed(1)}
+              cy={(H - (pts[peakIdx].count / max) * (H - 8)).toFixed(1)}
+              r="2" fill={INSTRUMENT.ice} style={glow(INSTRUMENT.ice, 4)}
+            />
+            {/* live leading edge — the newest sample, pulsing */}
+            <circle
+              cx={W} cy={(H - (pts[pts.length - 1].count / max) * (H - 8)).toFixed(1)}
+              r="2.5" fill={INSTRUMENT.goldHi} className="f-breathe"
+              style={glow(INSTRUMENT.goldHi, 6)}
+            />
+          </svg>
+        </InstrumentFrame>
       )}
       <div className="flex justify-between mt-1">
         <span className="f-lbl" style={{ letterSpacing: '0.16em' }}>-24h</span>
@@ -587,13 +602,20 @@ function TopSources({ sources }: { sources: Array<{ source_ip: string; count: nu
         <div key={s.source_ip} className="flex items-center gap-2.5 py-1.5 border-b border-gray-900">
           <span className="font-mono text-[9px] text-gray-500 w-4">{String(i + 1).padStart(2, '0')}</span>
           <span className="font-mono text-[10.5px] text-gray-400">{s.source_ip}</span>
-          <span className="flex-1 h-px bg-gold-500/25 relative">
+          <span className="flex-1 h-px relative" style={{ background: 'rgba(216,180,110,.22)' }}>
             <span
               className="absolute left-0 -top-px h-[3px]"
               style={{
                 width: `${(s.count / max) * 100}%`,
-                background: 'linear-gradient(90deg, rgba(126,207,226,.15), rgba(126,207,226,.55))',
+                background: `linear-gradient(90deg, rgba(138,216,234,.18), ${INSTRUMENT.ice})`,
+                boxShadow: `0 0 6px ${INSTRUMENT.ice}55`,
               }}
+            />
+            {/* lit cap at the end of the rail */}
+            <span
+              className="absolute -top-[2px] w-px h-[5px]"
+              style={{ left: `${(s.count / max) * 100}%`, background: INSTRUMENT.goldHi,
+                       boxShadow: `0 0 5px ${INSTRUMENT.goldHi}` }}
             />
           </span>
           <span className="font-mono text-[10px] text-cyan-400 w-9 text-right">{s.count}</span>

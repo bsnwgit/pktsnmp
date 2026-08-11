@@ -21,6 +21,7 @@ Performance notes
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone, timedelta
@@ -806,6 +807,31 @@ class SQLiteStorage(StorageBase):
 
     # ── Cleanup ───────────────────────────────────────────────────────────────
 
+    # Rows deleted per statement. This table grows by roughly 5M rows/day, so
+    # the first prune after retention has been unenforced can be enormous. One
+    # unbounded DELETE would hold a write lock for minutes, balloon the WAL to
+    # the size of everything it touched, and block ingest the whole time —
+    # batching keeps each transaction small and lets polling continue between.
+    _CLEANUP_BATCH = 50_000
+
+    async def _delete_batched(self, table: str, ts_column: str, cutoff: str) -> int:
+        """Delete rows older than cutoff in bounded transactions."""
+        total = 0
+        while True:
+            async with self._conn.execute(
+                f"DELETE FROM {table} WHERE rowid IN ("
+                f"  SELECT rowid FROM {table} WHERE {ts_column} < ? LIMIT ?"
+                f")",
+                (cutoff, self._CLEANUP_BATCH),
+            ) as cur:
+                deleted = cur.rowcount or 0
+            await self._conn.commit()
+            total += deleted
+            if deleted < self._CLEANUP_BATCH:
+                return total
+            # Yield so ingest and API queries are not starved during a long prune.
+            await asyncio.sleep(0)
+
     async def run_cleanup(self, retention_days: int) -> dict:
         # Compute cutoff in Python with T-format to match stored timestamps.
         # Using datetime('now', ...) produces a space-format string that compares
@@ -814,16 +840,13 @@ class SQLiteStorage(StorageBase):
             datetime.now(tz=timezone.utc) - timedelta(days=retention_days)
         ).strftime("%Y-%m-%dT%H:%M:%S")
 
-        async with self._conn.execute(
-            "DELETE FROM snmp_traps WHERE received_at < ?", (cutoff,)
-        ) as cur:
-            trap_count = cur.rowcount
-        async with self._conn.execute(
-            "DELETE FROM snmp_poll_results WHERE polled_at < ?", (cutoff,)
-        ) as cur:
-            poll_count = cur.rowcount
-        await self._conn.commit()
-        log.info(f"Cleanup: {trap_count} traps, {poll_count} poll results deleted (retention={retention_days}d)")
+        trap_count = await self._delete_batched("snmp_traps", "received_at", cutoff)
+        poll_count = await self._delete_batched("snmp_poll_results", "polled_at", cutoff)
+
+        log.info(
+            f"Cleanup: {trap_count} traps, {poll_count} poll results deleted "
+            f"(retention={retention_days}d, cutoff={cutoff})"
+        )
         return {
             "snmp_data_eligible": trap_count + poll_count,
             "deleted_traps": trap_count,
