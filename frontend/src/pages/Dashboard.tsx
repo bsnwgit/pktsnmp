@@ -569,7 +569,7 @@ function Radiant({ pct, loading }: { pct: number; loading: boolean }) {
           <g className="f-spin-rev">
             <circle cx="96" cy="96" r="72" stroke="rgba(126,207,226,.16)" />
             <circle cx="96" cy="96" r="72" stroke="rgba(126,207,226,.5)" strokeDasharray="34 260" strokeLinecap="round" />
-            <circle cx="24" cy="96" r="1.8" fill="#7ecfe2" />
+            <circle cx="24" cy="96" r="1.8" fill="#8ad8ea" />
           </g>
           <circle cx="96" cy="96" r={R} stroke="rgba(216,180,110,.18)" />
           <circle
@@ -624,11 +624,11 @@ function TrapFlux({ timeline, total }: { timeline: Array<{ hour: string; count: 
             </linearGradient>
           </defs>
           <path d={area} fill="url(#fluxfade)" />
-          <path d={line} fill="none" stroke="#7ecfe2" strokeWidth="1" opacity=".85" />
+          <path d={line} fill="none" stroke="#8ad8ea" strokeWidth="1" opacity=".85" />
           <circle
             cx={(peakIdx * step).toFixed(1)}
             cy={(H - (pts[peakIdx].count / max) * (H - 8)).toFixed(1)}
-            r="2" fill="#7ecfe2"
+            r="2" fill="#8ad8ea"
           />
         </svg>
       )}

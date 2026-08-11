@@ -72,49 +72,49 @@ const OID_GROUPS = {
     // per-interface. Wraparound (their actual weakness) is handled in
     // computeRates() instead of avoided by switching counters.
     oids:  ['ifInOctets', 'ifOutOctets'] as const,
-    color: ['#8ad8ea', '#9784cb'],
+    color: ['#ab9017', '#007dab'],
     unit:  'bps',
     isRate: true,
   },
   packets: {
     label: 'Packets',
     oids:  ['ifInUcastPkts', 'ifOutUcastPkts'] as const,
-    color: ['#63c3d8', '#f3c265'],
+    color: ['#ab9017', '#007dab'],
     unit:  'pkt/s',
     isRate: true,
   },
   errors: {
     label: 'Errors & Discards',
     oids:  ['ifInErrors', 'ifOutErrors', 'ifInDiscards', 'ifOutDiscards'] as const,
-    color: ['#ff6b5e', '#e88450', '#e5aa3d', '#a8c07a'],
+    color: ['#ab9017', '#007dab', '#d86353', '#00a49e'],
     unit:  '/s',
     isRate: true,
   },
   cpu: {
     label: 'CPU Load',
     oids:  ['hrProcessorLoad'] as const,
-    color: ['#7ee0a8'],
+    color: ['#ab9017'],
     unit:  '%',
     isRate: false,
   },
   memory: {
     label: 'Memory',
     oids:  ['hrMemorySize'] as const,
-    color: ['#6366f1'],
+    color: ['#ab9017'],
     unit:  'KB',
     isRate: false,
   },
   storage: {
     label: 'Storage',
     oids:  ['hrStorageUsed'] as const,
-    color: ['#f43f5e'],
+    color: ['#ab9017'],
     unit:  '',
     isRate: false,
   },
   ip: {
     label: 'IP / Protocol',
     oids:  ['ipInReceives', 'ipOutRequests', 'tcpCurrEstab', 'udpInDatagrams'] as const,
-    color: ['#0ea5e9', '#a855f7', '#f3c265', '#7ee0a8'],
+    color: ['#ab9017', '#007dab', '#d86353', '#00a49e'],
     unit:  '/s',
     isRate: true,
   },
@@ -122,21 +122,21 @@ const OID_GROUPS = {
   panTraffic: {
     label: 'PAN-OS Interface Traffic',
     oids:  ['panIfInBytes', 'panIfOutBytes'] as const,
-    color: ['#8ad8ea', '#9784cb'],
+    color: ['#ab9017', '#007dab'],
     unit:  'bps',
     isRate: true,
   },
   panPackets: {
     label: 'PAN-OS Interface Packets',
     oids:  ['panIfInPkts', 'panIfOutPkts', 'panIfInDropPkts', 'panIfOutDropPkts'] as const,
-    color: ['#63c3d8', '#f3c265', '#ff6b5e', '#e88450'],
+    color: ['#ab9017', '#007dab', '#d86353', '#00a49e'],
     unit:  'pkt/s',
     isRate: true,
   },
   panFirewall: {
     label: 'PAN-OS Firewall Health',
     oids:  ['panSysCpuUtilMgmt', 'panSysCpuUtilDataPlane', 'panSessionUtilization', 'panSessionActive'] as const,
-    color: ['#7ee0a8', '#6366f1', '#f3c265', '#8ad8ea'],
+    color: ['#ab9017', '#007dab', '#d86353', '#00a49e'],
     unit:  '',
     isRate: false,
   },
@@ -456,11 +456,11 @@ function ChartSection({ title, data, oids, colors, unit, alertEvents = [], noDat
               <ReferenceLine
                 key={`day-${ts}`}
                 x={ts}
-                stroke="#4b5563"
+                stroke="#5c6470"
                 strokeDasharray="3 3"
                 label={{
                   value: dayLabel(ts), position: 'insideTopLeft',
-                  fill: '#f3f4f6', fontSize: 12, fontWeight: 700,
+                  fill: '#e9e4d8', fontSize: 12, fontWeight: 700,
                 }}
               />
             ))}
