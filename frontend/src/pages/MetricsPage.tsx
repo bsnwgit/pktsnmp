@@ -23,7 +23,7 @@ import {
 } from '../api/client'
 import HelpButton from '../components/HelpButton'
 import IpLink from '../components/IpLink'
-import { InstrumentFrame, axisProps, tooltipProps, gridProps, glow, INSTRUMENT } from '../components/instrument'
+import { InstrumentFrame, axisProps, tooltipProps, gridProps, glow, INSTRUMENT, LinePulseGradient, liveEdgeDot } from '../components/instrument'
 import DeviceTypeIcon from '../components/DeviceTypeIcon'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -396,6 +396,10 @@ function ChartSection({ title, data, oids, colors, unit, alertEvents = [], noDat
                   <stop offset="95%" stopColor={colors[i] ?? '#a9a294'} stopOpacity={0} />
                 </linearGradient>
               ))}
+              {/* a travelling charge per series, so each trace reads as live */}
+              {oids.map((oid, i) => (
+                <LinePulseGradient key={`p-${oid}`} id={`pulse-${oid}`} color={colors[i] ?? '#a9a294'} />
+              ))}
             </defs>
             <CartesianGrid {...gridProps} />
             <XAxis
@@ -427,12 +431,12 @@ function ChartSection({ title, data, oids, colors, unit, alertEvents = [], noDat
                 key={oid}
                 type="monotone"
                 dataKey={oid}
-                stroke={colors[i] ?? '#a9a294'}
+                stroke={`url(#pulse-${oid})`}
                 fill={`url(#grad-${oid})`}
-                dot={false}
                 strokeWidth={1.6}
                 connectNulls={false}
                 style={glow(colors[i] ?? INSTRUMENT.gold, 5)}
+                dot={liveEdgeDot(data.length, colors[i] ?? INSTRUMENT.gold)}
                 activeDot={{ r: 3, strokeWidth: 0, fill: colors[i] ?? INSTRUMENT.gold }}
               />
             ))}
