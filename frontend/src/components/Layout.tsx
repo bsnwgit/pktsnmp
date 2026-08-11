@@ -252,7 +252,7 @@ export default function Layout({ children, chromeless = false }: { children: Rea
             style={{ letterSpacing: '0.13em' }}
           >
             <span className="text-xs w-3.5 text-center leading-none text-gray-500 group-hover:text-blue-500">❐</span>
-            <span>Docs</span>
+            <span>Documentation</span>
           </NavLink>
         </div>
 

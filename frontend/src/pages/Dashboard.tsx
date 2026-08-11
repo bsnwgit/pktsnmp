@@ -7,6 +7,7 @@ import {
 import { useAutoRefresh } from '../store/autoRefresh'
 import DeviceMetricsPanel from '../components/DeviceMetricsPanel'
 import HelpButton from '../components/HelpButton'
+import { RadialGauge, InstrumentFrame, InstrumentHead, glow, INSTRUMENT } from '../components/instrument'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -533,69 +534,6 @@ function EnvironmentTree({
 
 // ── Telemetry column ──────────────────────────────────────────────────────────
 
-function TeleHead({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-2.5 mb-3.5">
-      <span className="f-lbl">{children}</span>
-      <div className="flex-1 h-px bg-blue-500/25" />
-    </div>
-  )
-}
-
-/** Concentric survey rings — fabric integrity as a Prime-Radiant-style dial. */
-function Radiant({ pct, loading }: { pct: number; loading: boolean }) {
-  const R = 58
-  const C = 2 * Math.PI * R
-  const ticks = Array.from({ length: 72 }, (_, i) => {
-    const a = (i / 72) * Math.PI * 2 - Math.PI / 2
-    const long = i % 6 === 0
-    const r1 = long ? 30 : 34
-    return {
-      x1: 96 + Math.cos(a) * r1, y1: 96 + Math.sin(a) * r1,
-      x2: 96 + Math.cos(a) * 38, y2: 96 + Math.sin(a) * 38,
-      o: long ? 0.7 : 0.28,
-    }
-  })
-
-  return (
-    <div className="grid place-items-center py-1">
-      <div className="relative">
-        <svg width="192" height="192" viewBox="0 0 192 192" fill="none">
-          <g className="f-spin-slow">
-            <circle cx="96" cy="96" r="88" stroke="rgba(216,180,110,.1)" />
-            <circle cx="96" cy="96" r="88" stroke="rgba(216,180,110,.5)" strokeDasharray="2 20" />
-            <circle cx="96" cy="8" r="2.4" fill="#d8b46e" />
-          </g>
-          <g className="f-spin-rev">
-            <circle cx="96" cy="96" r="72" stroke="rgba(126,207,226,.16)" />
-            <circle cx="96" cy="96" r="72" stroke="rgba(126,207,226,.5)" strokeDasharray="34 260" strokeLinecap="round" />
-            <circle cx="24" cy="96" r="1.8" fill="#8ad8ea" />
-          </g>
-          <circle cx="96" cy="96" r={R} stroke="rgba(216,180,110,.18)" />
-          <circle
-            cx="96" cy="96" r={R}
-            stroke="#d8b46e" strokeWidth="1.6" strokeLinecap="round"
-            strokeDasharray={C}
-            strokeDashoffset={C * (1 - Math.max(0, Math.min(100, pct)) / 100)}
-            transform="rotate(-90 96 96)"
-            style={{ transition: 'stroke-dashoffset .8s ease' }}
-          />
-          <circle cx="96" cy="96" r="44" stroke="rgba(216,180,110,.26)" />
-          <g stroke="rgba(216,180,110,.44)">
-            {ticks.map((t, i) => (
-              <line key={i} x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2} opacity={t.o} />
-            ))}
-          </g>
-        </svg>
-        <div className="absolute inset-0 grid place-content-center text-center">
-          <div className="f-num f-num-gold text-[26px]">{loading ? '—' : pct.toFixed(1)}</div>
-          <div className="f-lbl mt-1.5">Integrity</div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 /** 24h trap flux — built from the timeline the dashboard already fetches. */
 function TrapFlux({ timeline, total }: { timeline: Array<{ hour: string; count: number }>; total: number }) {
   const W = 250, H = 54
@@ -789,22 +727,22 @@ export default function Dashboard() {
         {/* ── telemetry column ── */}
         <aside className="space-y-7 min-w-0">
           <section>
-            <TeleHead>Fabric Integrity</TeleHead>
-            <Radiant pct={reachablePct} loading={loading} />
+            <InstrumentHead>Fabric Integrity</InstrumentHead>
+            <RadialGauge pct={reachablePct} label="Integrity" loading={loading} />
           </section>
 
           <section>
-            <TeleHead>Trap Flux · 24h</TeleHead>
+            <InstrumentHead>Trap Flux · 24h</InstrumentHead>
             <TrapFlux timeline={dash.trap_timeline} total={dash.traps_24h} />
           </section>
 
           <section>
-            <TeleHead>Top Sources</TeleHead>
+            <InstrumentHead>Top Sources</InstrumentHead>
             <TopSources sources={dash.top_sources} />
           </section>
 
           <section>
-            <TeleHead>Event Stream</TeleHead>
+            <InstrumentHead>Event Stream</InstrumentHead>
             <EventStream traps={dash.recent_traps} />
           </section>
         </aside>

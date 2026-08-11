@@ -23,6 +23,7 @@ import {
 } from '../api/client'
 import HelpButton from '../components/HelpButton'
 import IpLink from '../components/IpLink'
+import { InstrumentFrame, axisProps, tooltipProps, gridProps, glow, INSTRUMENT } from '../components/instrument'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -394,15 +395,16 @@ function getNoDataHint(
 function ChartSection({ title, data, oids, colors, unit, alertEvents = [], noDataHint }: ChartSectionProps) {
   const hasData = groupHasData(data, oids)
   return (
-    <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">
+    <div className="f-panel p-4">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-gray-200">{title}</h3>
+        <h3 className="text-[10px] text-white" style={{ letterSpacing: '0.28em' }}>{title}</h3>
         {!hasData && (
           <span className="text-xs px-1.5 py-0.5 rounded bg-gray-700/60 text-gray-500 font-mono">no data</span>
         )}
       </div>
       {hasData ? (
-        <ResponsiveContainer width="100%" height={180}>
+        <InstrumentFrame height={180} live>
+        <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
             <defs>
               {oids.map((oid, i) => (
@@ -412,26 +414,23 @@ function ChartSection({ title, data, oids, colors, unit, alertEvents = [], noDat
                 </linearGradient>
               ))}
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#211c14" vertical={false} />
+            <CartesianGrid {...gridProps} />
             <XAxis
               dataKey="ts"
               type="number"
               scale="time"
               domain={['dataMin', 'dataMax']}
               tickFormatter={tsShort}
-              tick={{ fontSize: 10, fill: '#dcd6c9' }}
-              axisLine={false}
-              tickLine={false}
+              {...axisProps}
+              minTickGap={44}
             />
             <YAxis
               tickFormatter={v => fmt(v, unit)}
-              tick={{ fontSize: 10, fill: '#dcd6c9' }}
-              axisLine={false}
-              tickLine={false}
+              {...axisProps}
               width={60}
             />
             <Tooltip
-              contentStyle={{ background: '#0d1219', border: '1px solid #2a2418', borderRadius: 8, fontSize: 11 }}
+              {...tooltipProps}
               labelFormatter={v => new Date(v as number).toLocaleString()}
               formatter={(val: number, name: string) => [fmt(val, unit), OID_META[name]?.label ?? name]}
             />
@@ -448,8 +447,10 @@ function ChartSection({ title, data, oids, colors, unit, alertEvents = [], noDat
                 stroke={colors[i] ?? '#a9a294'}
                 fill={`url(#grad-${oid})`}
                 dot={false}
-                strokeWidth={2}
+                strokeWidth={1.6}
                 connectNulls={false}
+                style={glow(colors[i] ?? INSTRUMENT.gold, 5)}
+                activeDot={{ r: 3, strokeWidth: 0, fill: colors[i] ?? INSTRUMENT.gold }}
               />
             ))}
             {dayBoundaries(data).map(ts => (
@@ -474,6 +475,7 @@ function ChartSection({ title, data, oids, colors, unit, alertEvents = [], noDat
             ))}
           </AreaChart>
         </ResponsiveContainer>
+        </InstrumentFrame>
       ) : (
         <div className="h-40 flex flex-col items-center justify-center gap-1.5 text-center px-6 border border-dashed border-gray-800 rounded-lg">
           <p className="text-sm text-gray-500">No data in this time range</p>
