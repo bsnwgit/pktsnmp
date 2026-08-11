@@ -24,27 +24,10 @@ import {
 import HelpButton from '../components/HelpButton'
 import IpLink from '../components/IpLink'
 import { InstrumentFrame, axisProps, tooltipProps, gridProps, glow, INSTRUMENT } from '../components/instrument'
+import DeviceTypeIcon from '../components/DeviceTypeIcon'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-const DEVICE_TYPE_ICONS: Record<string, string> = {
-  firewall:      '🔥',
-  switch:        '🔀',
-  wap:           '📡',
-  wlc:           '🗼',
-  router:        '🌐',
-  iot:           '🔌',
-  ups:           '🔋',
-  server:        '🖥️',
-  storage:       '💾',
-  pdu:           '⚡',
-  camera:        '📷',
-  load_balancer: '⚖️',
-  vpn:           '🔒',
-  printer:       '🖨️',
-  other:         '📦',
-  '':            '📦',
-}
 
 const STATUS_COLOR: Record<string, string> = {
   up:      'bg-green-500',
@@ -497,7 +480,6 @@ function MetricStat({ label, value, valueClass = 'text-gray-300' }: { label: str
 
 function DeviceCard({ card, onClick }: { card: DeviceMetricsCard; onClick: () => void }) {
   const { device, latest, has_data } = card
-  const icon   = DEVICE_TYPE_ICONS[device.device_type] ?? '📦'
   const status = device.status || 'unknown'
 
   const inOctets  = latest['ifInOctets']?.value_numeric
@@ -538,7 +520,7 @@ function DeviceCard({ card, onClick }: { card: DeviceMetricsCard; onClick: () =>
       <div className="flex items-center gap-4 p-3 flex-wrap lg:flex-nowrap">
         {/* Identity */}
         <div className="flex items-center gap-2.5 min-w-[180px] flex-shrink-0">
-          <span className="text-xl flex-shrink-0">{icon}</span>
+          <DeviceTypeIcon type={device.device_type} size={18} className="text-blue-300 flex-shrink-0" />
           <div className="min-w-0">
             <p className="font-semibold text-sm text-gray-100 truncate">{device.name}</p>
             <p className="text-xs text-gray-500 font-mono truncate">{device.ip}</p>
@@ -994,7 +976,7 @@ export default function MetricsPage() {
             {/* Device mini-header */}
             <div className="p-3 border-b border-gray-800">
               <div className="flex items-center gap-2 mb-1">
-                <span>{DEVICE_TYPE_ICONS[selectedCard.device.device_type] ?? '📦'}</span>
+                <DeviceTypeIcon type={selectedCard.device.device_type} size={16} className="text-blue-300 flex-none" />
                 <p className="font-semibold text-xs text-gray-200 truncate">{selectedCard.device.name}</p>
               </div>
               <p className="text-xs font-mono text-gray-500"><IpLink ip={selectedCard.device.ip} /></p>
