@@ -72,28 +72,28 @@ const OID_GROUPS = {
     // per-interface. Wraparound (their actual weakness) is handled in
     // computeRates() instead of avoided by switching counters.
     oids:  ['ifInOctets', 'ifOutOctets'] as const,
-    color: ['#3b82f6', '#8b5cf6'],
+    color: ['#8ad8ea', '#9784cb'],
     unit:  'bps',
     isRate: true,
   },
   packets: {
     label: 'Packets',
     oids:  ['ifInUcastPkts', 'ifOutUcastPkts'] as const,
-    color: ['#06b6d4', '#f59e0b'],
+    color: ['#63c3d8', '#f3c265'],
     unit:  'pkt/s',
     isRate: true,
   },
   errors: {
     label: 'Errors & Discards',
     oids:  ['ifInErrors', 'ifOutErrors', 'ifInDiscards', 'ifOutDiscards'] as const,
-    color: ['#ef4444', '#f97316', '#eab308', '#84cc16'],
+    color: ['#ff6b5e', '#e88450', '#e5aa3d', '#a8c07a'],
     unit:  '/s',
     isRate: true,
   },
   cpu: {
     label: 'CPU Load',
     oids:  ['hrProcessorLoad'] as const,
-    color: ['#10b981'],
+    color: ['#7ee0a8'],
     unit:  '%',
     isRate: false,
   },
@@ -114,7 +114,7 @@ const OID_GROUPS = {
   ip: {
     label: 'IP / Protocol',
     oids:  ['ipInReceives', 'ipOutRequests', 'tcpCurrEstab', 'udpInDatagrams'] as const,
-    color: ['#0ea5e9', '#a855f7', '#f59e0b', '#10b981'],
+    color: ['#0ea5e9', '#a855f7', '#f3c265', '#7ee0a8'],
     unit:  '/s',
     isRate: true,
   },
@@ -122,21 +122,21 @@ const OID_GROUPS = {
   panTraffic: {
     label: 'PAN-OS Interface Traffic',
     oids:  ['panIfInBytes', 'panIfOutBytes'] as const,
-    color: ['#3b82f6', '#8b5cf6'],
+    color: ['#8ad8ea', '#9784cb'],
     unit:  'bps',
     isRate: true,
   },
   panPackets: {
     label: 'PAN-OS Interface Packets',
     oids:  ['panIfInPkts', 'panIfOutPkts', 'panIfInDropPkts', 'panIfOutDropPkts'] as const,
-    color: ['#06b6d4', '#f59e0b', '#ef4444', '#f97316'],
+    color: ['#63c3d8', '#f3c265', '#ff6b5e', '#e88450'],
     unit:  'pkt/s',
     isRate: true,
   },
   panFirewall: {
     label: 'PAN-OS Firewall Health',
     oids:  ['panSysCpuUtilMgmt', 'panSysCpuUtilDataPlane', 'panSessionUtilization', 'panSessionActive'] as const,
-    color: ['#10b981', '#6366f1', '#f59e0b', '#3b82f6'],
+    color: ['#7ee0a8', '#6366f1', '#f3c265', '#8ad8ea'],
     unit:  '',
     isRate: false,
   },
@@ -407,37 +407,37 @@ function ChartSection({ title, data, oids, colors, unit, alertEvents = [], noDat
             <defs>
               {oids.map((oid, i) => (
                 <linearGradient key={oid} id={`grad-${oid}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor={colors[i] ?? '#6b7280'} stopOpacity={0.3} />
-                  <stop offset="95%" stopColor={colors[i] ?? '#6b7280'} stopOpacity={0} />
+                  <stop offset="5%"  stopColor={colors[i] ?? '#a9a294'} stopOpacity={0.3} />
+                  <stop offset="95%" stopColor={colors[i] ?? '#a9a294'} stopOpacity={0} />
                 </linearGradient>
               ))}
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" vertical={false} />
+            <CartesianGrid strokeDasharray="3 3" stroke="#211c14" vertical={false} />
             <XAxis
               dataKey="ts"
               type="number"
               scale="time"
               domain={['dataMin', 'dataMax']}
               tickFormatter={tsShort}
-              tick={{ fontSize: 10, fill: '#d1d5db' }}
+              tick={{ fontSize: 10, fill: '#dcd6c9' }}
               axisLine={false}
               tickLine={false}
             />
             <YAxis
               tickFormatter={v => fmt(v, unit)}
-              tick={{ fontSize: 10, fill: '#d1d5db' }}
+              tick={{ fontSize: 10, fill: '#dcd6c9' }}
               axisLine={false}
               tickLine={false}
               width={60}
             />
             <Tooltip
-              contentStyle={{ background: '#111827', border: '1px solid #374151', borderRadius: 8, fontSize: 11 }}
+              contentStyle={{ background: '#0d1219', border: '1px solid #2a2418', borderRadius: 8, fontSize: 11 }}
               labelFormatter={v => new Date(v as number).toLocaleString()}
               formatter={(val: number, name: string) => [fmt(val, unit), OID_META[name]?.label ?? name]}
             />
             <Legend
               iconSize={8}
-              wrapperStyle={{ fontSize: 11, color: '#9ca3af' }}
+              wrapperStyle={{ fontSize: 11, color: '#a9a294' }}
               formatter={(name: string) => OID_META[name]?.label ?? name}
             />
             {oids.map((oid, i) => (
@@ -445,7 +445,7 @@ function ChartSection({ title, data, oids, colors, unit, alertEvents = [], noDat
                 key={oid}
                 type="monotone"
                 dataKey={oid}
-                stroke={colors[i] ?? '#6b7280'}
+                stroke={colors[i] ?? '#a9a294'}
                 fill={`url(#grad-${oid})`}
                 dot={false}
                 strokeWidth={2}
@@ -468,7 +468,7 @@ function ChartSection({ title, data, oids, colors, unit, alertEvents = [], noDat
               <ReferenceLine
                 key={ae.id}
                 x={alignTs(ae.fired_at)}
-                stroke={ae.severity === 'critical' ? '#ef4444' : ae.severity === 'warning' ? '#f59e0b' : '#3b82f6'}
+                stroke={ae.severity === 'critical' ? '#ff6b5e' : ae.severity === 'warning' ? '#f3c265' : '#8ad8ea'}
                 strokeDasharray="4 2"
               />
             ))}

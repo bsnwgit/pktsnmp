@@ -287,14 +287,14 @@ export default function DeviceMetricsPanel({ device, onClose }: Props) {
                   <span className="text-xs text-cyan-400">↓ In</span>
                   <span className="text-xs font-mono text-white">{fmtBytes(lastInRate)}</span>
                 </div>
-                <Sparkline data={rates} dataKey="inBps" color="#22d3ee" />
+                <Sparkline data={rates} dataKey="inBps" color="#8ad8ea" />
               </div>
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs text-violet-400">↑ Out</span>
                   <span className="text-xs font-mono text-white">{fmtBytes(lastOutRate)}</span>
                 </div>
-                <Sparkline data={rates} dataKey="outBps" color="#a78bfa" />
+                <Sparkline data={rates} dataKey="outBps" color="#b0a0dd" />
               </div>
             </>
           )}
