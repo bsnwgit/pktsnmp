@@ -17,7 +17,7 @@ import {
   api, DeviceTreeNode, MetricLatestItem, MetricPoint, OID_META,
 } from '../api/client'
 import IpLink from './IpLink'
-import { InstrumentFrame, glow, INSTRUMENT } from './instrument'
+import { InstrumentFrame, glow, INSTRUMENT, LinePulseGradient } from './instrument'
 
 // ── Rate computation ──────────────────────────────────────────────────────────
 
@@ -116,6 +116,9 @@ function Sparkline({
     <InstrumentFrame height={56} ticks={32}>
     <ResponsiveContainer width="100%" height="100%">
       <LineChart data={data} margin={{ top: 4, right: 2, bottom: 6, left: 2 }}>
+        <defs>
+          <LinePulseGradient id={`pulse-${dataKey}`} color={color || INSTRUMENT.ice} />
+        </defs>
         <YAxis domain={['auto', 'auto']} hide />
         <Tooltip
           content={({ active, payload }) => {
@@ -135,7 +138,7 @@ function Sparkline({
         <Line
           type="monotone"
           dataKey={dataKey}
-          stroke={color}
+          stroke={`url(#pulse-${dataKey})`}
           strokeWidth={1.4}
           dot={false}
           connectNulls={false}
