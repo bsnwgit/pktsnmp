@@ -37,7 +37,14 @@ class SQLiteLogHandler(logging.Handler):
     asynchronously from a background daemon thread.
     """
 
-    def __init__(self, db_path: str | Path, level: int = logging.WARNING) -> None:
+    # Capture INFO by default, matching every sibling pkt* app.
+    #
+    # This defaulted to WARNING, which made the app effectively unobservable:
+    # lifecycle events (storage backend selected, collectors started, retention
+    # runs) are all INFO, so app_logs held 3 rows over several weeks and the
+    # in-app Logs page showed nothing. A silent app looks identical to a
+    # healthy one right up until it isn't.
+    def __init__(self, db_path: str | Path, level: int = logging.INFO) -> None:
         super().__init__(level=level)
         self._db_path = str(db_path)
         self._queue: queue.Queue = queue.Queue()

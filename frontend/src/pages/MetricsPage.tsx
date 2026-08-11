@@ -23,27 +23,11 @@ import {
 } from '../api/client'
 import HelpButton from '../components/HelpButton'
 import IpLink from '../components/IpLink'
+import { InstrumentFrame, axisProps, tooltipProps, gridProps, glow, INSTRUMENT, LinePulseGradient, liveEdgeDot } from '../components/instrument'
+import DeviceTypeIcon from '../components/DeviceTypeIcon'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-const DEVICE_TYPE_ICONS: Record<string, string> = {
-  firewall:      '🔥',
-  switch:        '🔀',
-  wap:           '📡',
-  wlc:           '🗼',
-  router:        '🌐',
-  iot:           '🔌',
-  ups:           '🔋',
-  server:        '🖥️',
-  storage:       '💾',
-  pdu:           '⚡',
-  camera:        '📷',
-  load_balancer: '⚖️',
-  vpn:           '🔒',
-  printer:       '🖨️',
-  other:         '📦',
-  '':            '📦',
-}
 
 const STATUS_COLOR: Record<string, string> = {
   up:      'bg-green-500',
@@ -72,49 +56,49 @@ const OID_GROUPS = {
     // per-interface. Wraparound (their actual weakness) is handled in
     // computeRates() instead of avoided by switching counters.
     oids:  ['ifInOctets', 'ifOutOctets'] as const,
-    color: ['#3b82f6', '#8b5cf6'],
+    color: ['#ab9017', '#007dab'],
     unit:  'bps',
     isRate: true,
   },
   packets: {
     label: 'Packets',
     oids:  ['ifInUcastPkts', 'ifOutUcastPkts'] as const,
-    color: ['#06b6d4', '#f59e0b'],
+    color: ['#ab9017', '#007dab'],
     unit:  'pkt/s',
     isRate: true,
   },
   errors: {
     label: 'Errors & Discards',
     oids:  ['ifInErrors', 'ifOutErrors', 'ifInDiscards', 'ifOutDiscards'] as const,
-    color: ['#ef4444', '#f97316', '#eab308', '#84cc16'],
+    color: ['#ab9017', '#007dab', '#d86353', '#00a49e'],
     unit:  '/s',
     isRate: true,
   },
   cpu: {
     label: 'CPU Load',
     oids:  ['hrProcessorLoad'] as const,
-    color: ['#10b981'],
+    color: ['#ab9017'],
     unit:  '%',
     isRate: false,
   },
   memory: {
     label: 'Memory',
     oids:  ['hrMemorySize'] as const,
-    color: ['#6366f1'],
+    color: ['#ab9017'],
     unit:  'KB',
     isRate: false,
   },
   storage: {
     label: 'Storage',
     oids:  ['hrStorageUsed'] as const,
-    color: ['#f43f5e'],
+    color: ['#ab9017'],
     unit:  '',
     isRate: false,
   },
   ip: {
     label: 'IP / Protocol',
     oids:  ['ipInReceives', 'ipOutRequests', 'tcpCurrEstab', 'udpInDatagrams'] as const,
-    color: ['#0ea5e9', '#a855f7', '#f59e0b', '#10b981'],
+    color: ['#ab9017', '#007dab', '#d86353', '#00a49e'],
     unit:  '/s',
     isRate: true,
   },
@@ -122,21 +106,21 @@ const OID_GROUPS = {
   panTraffic: {
     label: 'PAN-OS Interface Traffic',
     oids:  ['panIfInBytes', 'panIfOutBytes'] as const,
-    color: ['#3b82f6', '#8b5cf6'],
+    color: ['#ab9017', '#007dab'],
     unit:  'bps',
     isRate: true,
   },
   panPackets: {
     label: 'PAN-OS Interface Packets',
     oids:  ['panIfInPkts', 'panIfOutPkts', 'panIfInDropPkts', 'panIfOutDropPkts'] as const,
-    color: ['#06b6d4', '#f59e0b', '#ef4444', '#f97316'],
+    color: ['#ab9017', '#007dab', '#d86353', '#00a49e'],
     unit:  'pkt/s',
     isRate: true,
   },
   panFirewall: {
     label: 'PAN-OS Firewall Health',
     oids:  ['panSysCpuUtilMgmt', 'panSysCpuUtilDataPlane', 'panSessionUtilization', 'panSessionActive'] as const,
-    color: ['#10b981', '#6366f1', '#f59e0b', '#3b82f6'],
+    color: ['#ab9017', '#007dab', '#d86353', '#00a49e'],
     unit:  '',
     isRate: false,
   },
@@ -394,50 +378,52 @@ function getNoDataHint(
 function ChartSection({ title, data, oids, colors, unit, alertEvents = [], noDataHint }: ChartSectionProps) {
   const hasData = groupHasData(data, oids)
   return (
-    <div className="bg-gray-900 rounded-xl p-4 border border-gray-800">
+    <div className="f-panel p-4">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-gray-200">{title}</h3>
+        <h3 className="text-[10px] text-white" style={{ letterSpacing: '0.28em' }}>{title}</h3>
         {!hasData && (
           <span className="text-xs px-1.5 py-0.5 rounded bg-gray-700/60 text-gray-500 font-mono">no data</span>
         )}
       </div>
       {hasData ? (
-        <ResponsiveContainer width="100%" height={180}>
+        <InstrumentFrame height={180} live>
+        <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
             <defs>
               {oids.map((oid, i) => (
                 <linearGradient key={oid} id={`grad-${oid}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor={colors[i] ?? '#6b7280'} stopOpacity={0.3} />
-                  <stop offset="95%" stopColor={colors[i] ?? '#6b7280'} stopOpacity={0} />
+                  <stop offset="5%"  stopColor={colors[i] ?? '#a9a294'} stopOpacity={0.3} />
+                  <stop offset="95%" stopColor={colors[i] ?? '#a9a294'} stopOpacity={0} />
                 </linearGradient>
               ))}
+              {/* a travelling charge per series, so each trace reads as live */}
+              {oids.map((oid, i) => (
+                <LinePulseGradient key={`p-${oid}`} id={`pulse-${oid}`} color={colors[i] ?? '#a9a294'} />
+              ))}
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" vertical={false} />
+            <CartesianGrid {...gridProps} />
             <XAxis
               dataKey="ts"
               type="number"
               scale="time"
               domain={['dataMin', 'dataMax']}
               tickFormatter={tsShort}
-              tick={{ fontSize: 10, fill: '#d1d5db' }}
-              axisLine={false}
-              tickLine={false}
+              {...axisProps}
+              minTickGap={44}
             />
             <YAxis
               tickFormatter={v => fmt(v, unit)}
-              tick={{ fontSize: 10, fill: '#d1d5db' }}
-              axisLine={false}
-              tickLine={false}
+              {...axisProps}
               width={60}
             />
             <Tooltip
-              contentStyle={{ background: '#111827', border: '1px solid #374151', borderRadius: 8, fontSize: 11 }}
+              {...tooltipProps}
               labelFormatter={v => new Date(v as number).toLocaleString()}
               formatter={(val: number, name: string) => [fmt(val, unit), OID_META[name]?.label ?? name]}
             />
             <Legend
               iconSize={8}
-              wrapperStyle={{ fontSize: 11, color: '#9ca3af' }}
+              wrapperStyle={{ fontSize: 11, color: '#a9a294' }}
               formatter={(name: string) => OID_META[name]?.label ?? name}
             />
             {oids.map((oid, i) => (
@@ -445,22 +431,24 @@ function ChartSection({ title, data, oids, colors, unit, alertEvents = [], noDat
                 key={oid}
                 type="monotone"
                 dataKey={oid}
-                stroke={colors[i] ?? '#6b7280'}
+                stroke={`url(#pulse-${oid})`}
                 fill={`url(#grad-${oid})`}
-                dot={false}
-                strokeWidth={2}
+                strokeWidth={1.6}
                 connectNulls={false}
+                style={glow(colors[i] ?? INSTRUMENT.gold, 5)}
+                dot={liveEdgeDot(data.length, colors[i] ?? INSTRUMENT.gold)}
+                activeDot={{ r: 3, strokeWidth: 0, fill: colors[i] ?? INSTRUMENT.gold }}
               />
             ))}
             {dayBoundaries(data).map(ts => (
               <ReferenceLine
                 key={`day-${ts}`}
                 x={ts}
-                stroke="#4b5563"
+                stroke="#5c6470"
                 strokeDasharray="3 3"
                 label={{
                   value: dayLabel(ts), position: 'insideTopLeft',
-                  fill: '#f3f4f6', fontSize: 12, fontWeight: 700,
+                  fill: '#e9e4d8', fontSize: 12, fontWeight: 700,
                 }}
               />
             ))}
@@ -468,12 +456,13 @@ function ChartSection({ title, data, oids, colors, unit, alertEvents = [], noDat
               <ReferenceLine
                 key={ae.id}
                 x={alignTs(ae.fired_at)}
-                stroke={ae.severity === 'critical' ? '#ef4444' : ae.severity === 'warning' ? '#f59e0b' : '#3b82f6'}
+                stroke={ae.severity === 'critical' ? '#ff6b5e' : ae.severity === 'warning' ? '#f3c265' : '#8ad8ea'}
                 strokeDasharray="4 2"
               />
             ))}
           </AreaChart>
         </ResponsiveContainer>
+        </InstrumentFrame>
       ) : (
         <div className="h-40 flex flex-col items-center justify-center gap-1.5 text-center px-6 border border-dashed border-gray-800 rounded-lg">
           <p className="text-sm text-gray-500">No data in this time range</p>
@@ -495,7 +484,6 @@ function MetricStat({ label, value, valueClass = 'text-gray-300' }: { label: str
 
 function DeviceCard({ card, onClick }: { card: DeviceMetricsCard; onClick: () => void }) {
   const { device, latest, has_data } = card
-  const icon   = DEVICE_TYPE_ICONS[device.device_type] ?? '📦'
   const status = device.status || 'unknown'
 
   const inOctets  = latest['ifInOctets']?.value_numeric
@@ -536,7 +524,7 @@ function DeviceCard({ card, onClick }: { card: DeviceMetricsCard; onClick: () =>
       <div className="flex items-center gap-4 p-3 flex-wrap lg:flex-nowrap">
         {/* Identity */}
         <div className="flex items-center gap-2.5 min-w-[180px] flex-shrink-0">
-          <span className="text-xl flex-shrink-0">{icon}</span>
+          <DeviceTypeIcon type={device.device_type} size={18} className="text-blue-300 flex-shrink-0" />
           <div className="min-w-0">
             <p className="font-semibold text-sm text-gray-100 truncate">{device.name}</p>
             <p className="text-xs text-gray-500 font-mono truncate">{device.ip}</p>
@@ -992,7 +980,7 @@ export default function MetricsPage() {
             {/* Device mini-header */}
             <div className="p-3 border-b border-gray-800">
               <div className="flex items-center gap-2 mb-1">
-                <span>{DEVICE_TYPE_ICONS[selectedCard.device.device_type] ?? '📦'}</span>
+                <DeviceTypeIcon type={selectedCard.device.device_type} size={16} className="text-blue-300 flex-none" />
                 <p className="font-semibold text-xs text-gray-200 truncate">{selectedCard.device.name}</p>
               </div>
               <p className="text-xs font-mono text-gray-500"><IpLink ip={selectedCard.device.ip} /></p>

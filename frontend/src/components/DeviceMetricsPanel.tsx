@@ -17,6 +17,7 @@ import {
   api, DeviceTreeNode, MetricLatestItem, MetricPoint, OID_META,
 } from '../api/client'
 import IpLink from './IpLink'
+import { InstrumentFrame, glow, INSTRUMENT, LinePulseGradient } from './instrument'
 
 // ── Rate computation ──────────────────────────────────────────────────────────
 
@@ -112,15 +113,23 @@ function Sparkline({
     )
   }
   return (
-    <ResponsiveContainer width="100%" height={56}>
-      <LineChart data={data}>
+    <InstrumentFrame height={56} ticks={32}>
+    <ResponsiveContainer width="100%" height="100%">
+      <LineChart data={data} margin={{ top: 4, right: 2, bottom: 6, left: 2 }}>
+        <defs>
+          <LinePulseGradient id={`pulse-${dataKey}`} color={color || INSTRUMENT.ice} />
+        </defs>
         <YAxis domain={['auto', 'auto']} hide />
         <Tooltip
           content={({ active, payload }) => {
             if (!active || !payload?.length) return null
             const v = payload[0].value as number | null
             return (
-              <div className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-white">
+              <div
+                className="px-2 py-1 font-mono text-[11px] text-white"
+                style={{ background: 'rgba(13,18,25,.96)', border: '1px solid rgba(216,180,110,.34)',
+                         boxShadow: '0 0 24px rgba(216,180,110,.10)' }}
+              >
                 {fmtBytes(v)}
               </div>
             )
@@ -129,14 +138,17 @@ function Sparkline({
         <Line
           type="monotone"
           dataKey={dataKey}
-          stroke={color}
-          strokeWidth={1.5}
+          stroke={`url(#pulse-${dataKey})`}
+          strokeWidth={1.4}
           dot={false}
           connectNulls={false}
           isAnimationActive={false}
+          style={glow(color || INSTRUMENT.ice, 4)}
+          activeDot={{ r: 2.5, strokeWidth: 0, fill: color || INSTRUMENT.ice }}
         />
       </LineChart>
     </ResponsiveContainer>
+    </InstrumentFrame>
   )
 }
 
@@ -287,14 +299,14 @@ export default function DeviceMetricsPanel({ device, onClose }: Props) {
                   <span className="text-xs text-cyan-400">↓ In</span>
                   <span className="text-xs font-mono text-white">{fmtBytes(lastInRate)}</span>
                 </div>
-                <Sparkline data={rates} dataKey="inBps" color="#22d3ee" />
+                <Sparkline data={rates} dataKey="inBps" color="#8ad8ea" />
               </div>
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs text-violet-400">↑ Out</span>
                   <span className="text-xs font-mono text-white">{fmtBytes(lastOutRate)}</span>
                 </div>
-                <Sparkline data={rates} dataKey="outBps" color="#a78bfa" />
+                <Sparkline data={rates} dataKey="outBps" color="#b0a0dd" />
               </div>
             </>
           )}
