@@ -1,6 +1,7 @@
 import { useState, useEffect, FormEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../store/auth'
+import { BrandLockup } from '../components/Brand'
 
 const SSO_ERROR_MESSAGES: Record<string, string> = {
   missing_params:             'SSO login failed: missing code or state.',
@@ -68,14 +69,38 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 flex items-center justify-center">
-      <div className="w-full max-w-sm">
-        {/* Logo */}
-        <div className="flex justify-center mb-8">
-          <img src="/lockup-128h.png" alt="pktSNMP" className="max-w-full h-auto" />
+    <div className="relative z-10 min-h-screen flex items-center justify-center overflow-hidden">
+
+      {/* Decorative survey rings behind the panel — the console "waking up" */}
+      <svg
+        className="absolute pointer-events-none opacity-[0.55]"
+        width="720" height="720" viewBox="0 0 720 720" fill="none"
+        aria-hidden="true"
+      >
+        <g className="f-spin-slow">
+          <circle cx="360" cy="360" r="330" stroke="rgba(216,180,110,.07)" />
+          <circle cx="360" cy="360" r="330" stroke="rgba(216,180,110,.22)" strokeDasharray="2 26" />
+          <circle cx="360" cy="30" r="3" fill="rgba(216,180,110,.5)" />
+        </g>
+        <g className="f-spin-rev">
+          <circle cx="360" cy="360" r="252" stroke="rgba(126,207,226,.09)" />
+          <circle cx="360" cy="360" r="252" stroke="rgba(126,207,226,.2)" strokeDasharray="60 420" strokeLinecap="round" />
+        </g>
+        <circle cx="360" cy="360" r="186" stroke="rgba(216,180,110,.05)" />
+      </svg>
+
+      <div className="relative w-full max-w-[380px] px-6">
+        {/* Mark */}
+        <div className="flex justify-center mb-9">
+          <BrandLockup markSize={54} descriptor="SNMP Telemetry Console" />
         </div>
 
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-8 space-y-5">
+        <div className="f-panel f-tick-on bg-gray-950/80 backdrop-blur-sm p-8 space-y-6">
+
+          <div className="flex items-center gap-3">
+            <span className="f-lbl f-lbl-gold">Authenticate</span>
+            <div className="f-rule" />
+          </div>
 
           {/* SAML SSO button — shown when configured */}
           {samlEnabled && (
@@ -84,20 +109,20 @@ export default function Login() {
                 type="button"
                 onClick={handleSamlLogin}
                 disabled={samlLoading}
-                className="w-full flex items-center justify-center gap-2.5 bg-blue-700 hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-lg py-2.5 transition-colors"
+                className="w-full flex items-center justify-center gap-3 border border-blue-500/40 hover:border-blue-500 hover:bg-blue-500/[0.06] disabled:opacity-40 disabled:cursor-not-allowed text-blue-300 py-3 transition-colors f-lbl"
               >
-                <svg viewBox="0 0 28 28" className="w-5 h-5 flex-shrink-0" fill="currentColor">
-                  <circle cx="14" cy="14" r="14" fill="white"/>
-                  <circle cx="14" cy="14" r="6" fill="#007DC1"/>
+                <svg viewBox="0 0 28 28" className="w-4 h-4 flex-shrink-0" fill="none">
+                  <circle cx="14" cy="14" r="12" stroke="currentColor" strokeWidth="1.5"/>
+                  <circle cx="14" cy="14" r="5" fill="currentColor"/>
                 </svg>
                 {samlLoading ? 'Redirecting…' : 'Sign in with Okta'}
               </button>
 
               {localEnabled && (
                 <div className="flex items-center gap-3">
-                  <div className="flex-1 h-px bg-gray-700" />
-                  <span className="text-xs text-gray-500">or</span>
-                  <div className="flex-1 h-px bg-gray-700" />
+                  <div className="flex-1 h-px bg-blue-500/[0.12]" />
+                  <span className="f-lbl">or</span>
+                  <div className="flex-1 h-px bg-blue-500/[0.12]" />
                 </div>
               )}
             </>
@@ -106,7 +131,7 @@ export default function Login() {
           {/* Local login form — hidden when local auth is disabled */}
           {localEnabled && <form onSubmit={handleSubmit} className="space-y-5">
             <div>
-              <label className="block text-sm font-medium text-white mb-1.5">Username or Email</label>
+              <label className="f-lbl block mb-2">Username or Email</label>
               <input
                 type="text"
                 value={username}
@@ -114,25 +139,25 @@ export default function Login() {
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.form?.requestSubmit() } }}
                 required
                 autoFocus
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full border px-3 py-2.5"
                 placeholder="admin"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-white mb-1.5">Password</label>
+              <label className="f-lbl block mb-2">Password</label>
               <input
                 type="password"
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.form?.requestSubmit() } }}
                 required
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full border px-3 py-2.5"
                 placeholder="••••••••"
               />
             </div>
 
             {error && (
-              <div className="bg-red-950 border border-red-800 rounded-lg px-3 py-2 text-red-300 text-sm">
+              <div className="border border-red-500/40 bg-red-500/[0.06] px-3 py-2.5 text-red-400 text-[10px] uppercase tracking-[0.14em] leading-relaxed">
                 {error}
               </div>
             )}
@@ -140,12 +165,16 @@ export default function Login() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-gray-700 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-lg py-2.5 transition-colors"
+              className="w-full border border-blue-500/40 hover:border-blue-500 hover:bg-blue-500/25 hover:text-blue-200 disabled:opacity-40 disabled:cursor-not-allowed text-blue-300 py-3 transition-colors f-lbl"
             >
-              {loading ? 'Signing in…' : 'Sign in'}
+              {loading ? 'Authenticating…' : 'Sign in'}
             </button>
           </form>}
         </div>
+
+        <p className="f-lbl text-center mt-6" style={{ letterSpacing: '0.34em' }}>
+          Packet Software Netware
+        </p>
       </div>
     </div>
   )

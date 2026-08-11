@@ -248,6 +248,15 @@ export const api = {
   getSnmpStatus: () => request<SnmpStatus>('/snmp/status'),
   getSnmpDevices: () => request<SnmpDevice[]>('/snmp/devices'),
   getSnmpTraps: () => request<SnmpTrap[]>('/snmp/traps'),
+  logForwardTest: (host: string, port: number, protocol: string) =>
+    request<{ ok: boolean; sent: number; errors: number; last_error: string; target: string }>(
+      '/system/log-forward/test', { method: 'POST', body: JSON.stringify({ host, port, protocol }) }),
+  logForwardStatus: () =>
+    request<{ enabled: boolean; sent?: number; dropped?: number; errors?: number; last_error?: string; target?: string }>(
+      '/system/log-forward/status'),
+  logForwardReload: () =>
+    request<{ enabled: boolean }>('/system/log-forward/reload', { method: 'POST' }),
+
   getSnmpDashboard: () => request<SnmpDashboard>('/snmp/dashboard'),
   getDeviceTree: () => request<EnvironmentNode[]>('/snmp/devices/tree'),
 

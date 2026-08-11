@@ -50,6 +50,33 @@ async def lifespan(app: FastAPI):
 
     log.info("pktSNMP starting up")
 
+    # Ship our own logs to pktLog if configured.
+    try:
+        import json as _json, logging as _logging
+        import aiosqlite as _aio
+        _fwd: dict = {}
+        async with _aio.connect(settings.db_path) as _db:
+            async with _db.execute(
+                "SELECT key, value FROM settings WHERE key LIKE 'log_forward_%'"
+            ) as _cur:
+                for _k, _v in await _cur.fetchall():
+                    try:
+                        _fwd[_k] = _json.loads(_v)
+                    except Exception:
+                        _fwd[_k] = _v
+        if _fwd.get("log_forward_enabled"):
+            from app.log_forward import configure_forwarding
+            configure_forwarding(
+                enabled=True,
+                host=str(_fwd.get("log_forward_host") or ""),
+                port=int(_fwd.get("log_forward_port") or 5514),
+                protocol=str(_fwd.get("log_forward_protocol") or "udp"),
+                level=getattr(_logging, str(_fwd.get("log_forward_level") or "INFO"), _logging.INFO),
+                app_name=str(_fwd.get("log_forward_app_name") or "pktsnmp"),
+            )
+    except Exception as _e:
+        log.warning(f"Log forwarding setup skipped: {_e}")
+
     # Run SQLite migrations
     await init_db()
     log.info("Database migrations applied")
@@ -74,6 +101,15 @@ async def lifespan(app: FastAPI):
     cleanup = AlertCleanup()
     await cleanup.start()
     log.info("Alert cleanup started")
+
+    # Start time-series retention. The backends have always implemented
+    # run_cleanup() and Settings has always exposed retention_days_raw, but
+    # nothing called it — poll results accumulated forever regardless of the
+    # configured retention. This is what makes that setting real.
+    from app.storage.retention import StorageRetention
+    retention = StorageRetention()
+    await retention.start()
+    log.info("Storage retention started")
 
     # Start backup scheduler
     from app.backup import BackupScheduler
@@ -103,6 +139,7 @@ async def lifespan(app: FastAPI):
         await app.state.local_collector.stop()
     await engine.stop()
     await cleanup.stop()
+    await retention.stop()
     await backup_scheduler.stop()
     from app.storage.factory import close_storage
     await close_storage()
