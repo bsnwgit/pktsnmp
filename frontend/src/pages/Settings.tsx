@@ -7,6 +7,7 @@ import HelpButton from '../components/HelpButton'
 import { copyToClipboard } from '../utils/clipboard'
 import Collectors from './Collectors'
 import OidCatalog from './OidCatalog'
+import { BrandLockup } from '../components/Brand'
 
 // ── Error boundary ────────────────────────────────────────────────────────────
 class TabErrorBoundary extends Component<{ children: React.ReactNode }, { err: Error | null }> {
@@ -1853,7 +1854,7 @@ export default function Settings() {
             <div className="px-6 py-4 border-b border-gray-800 grid grid-cols-3 gap-4 items-center">
               <h2 className="text-sm font-semibold text-white">System: {systemInfo?.app_name ?? 'pktSNMP'}</h2>
               <div className="col-span-2">
-                <img src="lockup-64h.png" alt={systemInfo?.app_name ?? 'pktSNMP'} className="h-8 w-auto" />
+                <BrandLockup markSize={32} descriptor={null} />
               </div>
             </div>
             <div className="px-6 py-2">
