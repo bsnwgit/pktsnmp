@@ -27,6 +27,43 @@ log = logging.getLogger("pktsnmp.snmp.collector_push")
 
 # ── SSH helpers ───────────────────────────────────────────────────────────────
 
+def _apply_host_key_policy(client) -> None:
+    """Verify the host key instead of trusting it on first sight.
+
+    AutoAddPolicy accepted any key a host offered and cached it, so the first
+    connection — the one that establishes trust — was unauthenticated. A machine
+    in between could present its own key and capture the SSH credentials used to
+    log in to network infrastructure.
+
+    Known hosts come from the system file, then ~/.ssh/known_hosts, then
+    PKT_SSH_KNOWN_HOSTS if set — which is how an estate with its own key store
+    points this at it. There is deliberately no "trust anything" switch: that
+    would just put the original vulnerability behind a flag.
+    """
+    import os
+
+    import paramiko
+
+    client.load_system_host_keys()
+    for candidate in (
+        os.environ.get("PKT_SSH_KNOWN_HOSTS"),
+        os.path.expanduser("~/.ssh/known_hosts"),
+    ):
+        if candidate and os.path.exists(candidate):
+            try:
+                client.load_host_keys(candidate)
+            except OSError:
+                pass
+
+    # RejectPolicy unconditionally. An earlier version of this fix kept an
+    # AutoAddPolicy escape hatch behind an environment variable, which is
+    # exactly the blind first-contact trust the fix exists to remove — it just
+    # moved it behind a flag. Point PKT_SSH_KNOWN_HOSTS at a file instead: a
+    # host key can be recorded deliberately, which is auditable, where
+    # "accept whatever answers this time" is not.
+    client.set_missing_host_key_policy(paramiko.RejectPolicy())
+
+
 def _open_ssh(collector: dict, ssh_key_pem: str | None, ssh_password: str | None) -> paramiko.SSHClient:
     """Open an SSH connection based on collector config. Returns connected client."""
     host = collector.get("ssh_host") or collector.get("ip") or ""
@@ -38,7 +75,7 @@ def _open_ssh(collector: dict, ssh_key_pem: str | None, ssh_password: str | None
         raise ValueError("Collector has no host/IP configured for SSH")
 
     client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    _apply_host_key_policy(client)
 
     if auth_type == "key":
         if not ssh_key_pem:
