@@ -789,7 +789,7 @@ To add a new migration: create `migrations/NNN_your_change.sql` and restart the 
 
 ### App-wide contextual help
 
-Every page and admin tab (Dashboard, Metrics, Alerts, Logs, Devices, and every tab in Settings, including Collectors and OID Catalog) has a **?** help button next to the page/section title, except Login. Clicking it opens an inline popover explaining what the page does and any non-obvious behavior (e.g. "changes here require a service restart"). This is static, bundled help content — no network call, no AI involved.
+Every page and admin tab (Dashboard, Metrics, Alerts, Logs, Devices, and every tab in Settings, including Collectors and OID Catalog) has a **?** help button next to the page/section title, except Login. Clicking it opens an inline popover explaining what the page does and any non-obvious behavior (e.g. "changes here require a service restart"). This is static, bundled help content — no network call.
 
 ### Per-user IP intelligence / reputation lookup
 
