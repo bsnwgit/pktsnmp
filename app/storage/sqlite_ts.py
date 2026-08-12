@@ -533,14 +533,28 @@ class SQLiteStorage(StorageBase):
         Used for the Collectors page sparkline and poll_rate_low alert evaluation.
         """
         bucket_seconds = bucket_minutes * 60
+
+        # Parameters bind in the order their placeholders appear in the SQL, and
+        # the two bucket placeholders are in the SELECT — ahead of everything in
+        # the WHERE. They were previously appended *after* collector_id, so a
+        # call that passed a collector bound it to the bucket divisor and the
+        # bucket size to collector_id, and the query matched nothing. Every call
+        # from /collectors/{id}/ingest-rate passes one, so the Collectors
+        # sparkline returned an empty series in all cases.
+        params: list = [bucket_seconds, bucket_seconds]
+
+        # `hours` is bound rather than interpolated. FastAPI bounds it with
+        # Query(ge=1, le=24) on the HTTP path, but this method is also called
+        # from alert evaluation, and a storage API should not depend on every
+        # caller having validated first.
         # Use strftime T-format to match stored timestamps (stored with 'T' separator)
-        conditions = [f"polled_at >= strftime('%Y-%m-%dT%H:%M:%S', 'now', '-{hours} hours')"]
-        params: list = []
+        conditions = ["polled_at >= strftime('%Y-%m-%dT%H:%M:%S', 'now', ?)"]
+        params.append(f"-{int(hours)} hours")
+
         if collector_id is not None:
             conditions.append("collector_id = ?")
             params.append(collector_id)
         where = "WHERE " + " AND ".join(conditions)
-        params += [bucket_seconds, bucket_seconds]
 
         sql = f"""
             SELECT

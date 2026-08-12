@@ -27,6 +27,36 @@ log = logging.getLogger("pktsnmp.snmp.collector_push")
 
 # ── SSH helpers ───────────────────────────────────────────────────────────────
 
+def _apply_host_key_policy(client) -> None:
+    """Verify the host key instead of trusting it on first sight.
+
+    AutoAddPolicy accepted any key a host offered and cached it, so the first
+    connection — the one that establishes trust — was unauthenticated. A machine
+    in between could present its own key and capture the SSH credentials used to
+    log in to network infrastructure.
+
+    Known hosts come from the usual places. If an estate has never had its keys
+    recorded, PKT_SSH_TRUST_NEW_HOSTS=1 restores the old behaviour; it is opt-in
+    and named in the failure message so it cannot be switched on unknowingly.
+    """
+    import os
+
+    import paramiko
+
+    client.load_system_host_keys()
+    user_known = os.path.expanduser("~/.ssh/known_hosts")
+    if os.path.exists(user_known):
+        try:
+            client.load_host_keys(user_known)
+        except OSError:
+            pass
+
+    if os.environ.get("PKT_SSH_TRUST_NEW_HOSTS") == "1":
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    else:
+        client.set_missing_host_key_policy(paramiko.RejectPolicy())
+
+
 def _open_ssh(collector: dict, ssh_key_pem: str | None, ssh_password: str | None) -> paramiko.SSHClient:
     """Open an SSH connection based on collector config. Returns connected client."""
     host = collector.get("ssh_host") or collector.get("ip") or ""
@@ -38,7 +68,7 @@ def _open_ssh(collector: dict, ssh_key_pem: str | None, ssh_password: str | None
         raise ValueError("Collector has no host/IP configured for SSH")
 
     client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    _apply_host_key_policy(client)
 
     if auth_type == "key":
         if not ssh_key_pem:
