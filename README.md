@@ -4,7 +4,7 @@
   <img src="lockup-256h.png" alt="pktSNMP" height="64">
 </p>
 
-SNMP ingest management and visualization platform — part of the pkt suite. Receives SNMP data from remote otelcol collectors and local devices, stores it in SQLite (or ClickHouse/DuckDB), and surfaces it through a React UI with real-time alerting and an AI assistant.
+SNMP ingest management and visualization platform — part of the pkt suite. Receives SNMP data from remote otelcol collectors and local devices, stores it in SQLite (or ClickHouse/DuckDB), and surfaces it through a React UI with real-time alerting.
 
 **Default port:** `8767` (HTTP) — see [SSL/TLS](#ssltls) for HTTPS.
 
@@ -88,8 +88,7 @@ Setting `PKTSNMP_INSTALL_DIR` and/or `PKTSNMP_PORT` skips the corresponding inte
 │   ├── REST API  (app/api/)                                   │
 │   ├── SNMP trap receiver  (UDP 162, asyncio)                 │
 │   ├── Local poll engine   (pysnmp, asyncio)                  │
-│   ├── Alert engine        (60s loop, fires + resolves)       │
-│   └── AI assistant        (Ollama/local, or Anthropic)       │
+│   └── Alert engine        (60s loop, fires + resolves)       │
 │                                                              │
 │   SQLite  pktsnmp.db          ← settings, users, devices,    │
 │                                  collectors, alert rules,     │
@@ -435,7 +434,6 @@ sub-tabs.
 | **Security** | Users | User accounts, roles, password resets |
 | | Auth | Okta SAML 2.0 configuration |
 | | Suite Integration | Suite token, Copy Token, Regen, managed-mode status |
-| | AI Assistant | AI provider config for the AI Assistant panel — local/self-hosted (Ollama, or any OpenAI-compatible endpoint) and cloud (Anthropic), each independently enabled/disabled; local providers are tried first. Scoped strictly to pktSNMP's own domain — off-topic questions and prompt-injection/override attempts are refused server-side before ever reaching the provider. Each provider call is allowed up to **180 seconds** to respond — local models on modest hardware can take well over a minute on a complex question, and a shorter ceiling just turned those into spurious failures |
 | | SSL / TLS | HTTPS enable/disable toggle, cert/key paths |
 | **Data** | Storage | Time-series storage backend (SQLite/DuckDB/ClickHouse) |
 | | Backups | Backup schedule, retention, manual trigger |
@@ -720,9 +718,6 @@ because it looks like a backup either way.
 | Alert fires but dot still green | Alert engine evaluates every 60s; wait one cycle. If persists, check `devices.status` in SQLite directly |
 | Storage backend wrong on startup | `storage_backend` setting in SQLite takes effect on next restart; restart the service |
 | ClickHouse not found | Verify ClickHouse is running: `systemctl status clickhouse-server`; check credentials in `config.yaml` |
-| AI Assistant chat said "Not authenticated" | Fixed 2026-08-03 — the chat request wasn't sending the session's auth token, unrelated to Ollama/Anthropic/OpenAI settings. Update to the latest build if you still see this |
-| AI Assistant chat showed a blank provider error (e.g. `"Ollama error:"`) | Fixed 2026-08-03 — connection/timeout failures now name the provider and its base URL instead of an empty message |
-| AI Assistant says the provider "didn't finish responding within 180s" | The provider was reachable but too slow. Common with a large local model on CPU-only hardware. Ask a shorter/simpler question, use a smaller model, or give the Ollama host more resources. Cloud providers rarely approach this ceiling — if Anthropic hits it, suspect the network path rather than the model |
 
 ---
 
@@ -769,7 +764,7 @@ pktsnmp/
 │   └── src/
 │       ├── pages/    # Dashboard, Alerts, Settings, Login, Collectors, Devices, Logs, OidCatalog,
 │       │             # MetricsPage — Collectors/OidCatalog render as Settings tabs, not their own routes
-│       ├── components/  # Layout (nav + alert badge), AiAssistant, IpLink (external + internal IP lookup)
+│       ├── components/  # Layout (nav + alert badge), IpLink (external + internal IP lookup)
 │       ├── store/    # auth, autoRefresh
 │       └── api/      # typed API client (client.ts)
 ├── migrations/       # SQLite schema migrations (auto-applied at startup, append-only)

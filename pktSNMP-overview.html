@@ -324,7 +324,6 @@
         <span class="pill"><span class="dot"></span>Real-Time Polling</span>
         <span class="pill"><span class="dot b"></span>OTLP Ingest</span>
         <span class="pill"><span class="dot y"></span>Smart Alerting</span>
-        <span class="pill"><span class="dot"></span>AI Assistant</span>
         <span class="pill"><span class="dot b"></span>Multi-Collector</span>
       </div>
     </div>
@@ -485,19 +484,12 @@
       <text x="447" y="435" text-anchor="middle" fill="#7c8ea8" font-size="9">12 rule types</text>
       <text x="447" y="449" text-anchor="middle" fill="#7c8ea8" font-size="9">fire + auto-resolve</text>
 
-      <!-- AI Assistant -->
-      <rect x="530" y="388" width="135" height="70" rx="7" fill="#162032" stroke="#a855f7"/>
-      <text x="597" y="405" text-anchor="middle" fill="#a855f7" font-size="10" font-weight="700">AI Assistant</text>
-      <text x="597" y="421" text-anchor="middle" fill="#7c8ea8" font-size="9">Anthropic Claude</text>
-      <text x="597" y="435" text-anchor="middle" fill="#7c8ea8" font-size="9">NL query over</text>
-      <text x="597" y="449" text-anchor="middle" fill="#7c8ea8" font-size="9">metrics + events</text>
-
       <!-- Storage backends -->
-      <rect x="680" y="388" width="145" height="70" rx="7" fill="#162032" stroke="#1e2e48"/>
-      <text x="752" y="405" text-anchor="middle" fill="#e2e8f0" font-size="10" font-weight="700">Storage</text>
-      <text x="752" y="421" text-anchor="middle" fill="#7c8ea8" font-size="9">SQLite pktsnmp.db</text>
-      <text x="752" y="435" text-anchor="middle" fill="#7c8ea8" font-size="9">SQLite timeseries.db</text>
-      <text x="752" y="449" text-anchor="middle" fill="#7c8ea8" font-size="9">or ClickHouse</text>
+      <rect x="530" y="388" width="295" height="70" rx="7" fill="#162032" stroke="#1e2e48"/>
+      <text x="678" y="405" text-anchor="middle" fill="#e2e8f0" font-size="10" font-weight="700">Storage</text>
+      <text x="678" y="421" text-anchor="middle" fill="#7c8ea8" font-size="9">SQLite pktsnmp.db</text>
+      <text x="678" y="435" text-anchor="middle" fill="#7c8ea8" font-size="9">SQLite timeseries.db</text>
+      <text x="678" y="449" text-anchor="middle" fill="#7c8ea8" font-size="9">or ClickHouse</text>
 
       <!-- ════════════════════════════════════════
            React UI — right side
@@ -517,10 +509,9 @@
       <text x="890" y="361" fill="#7c8ea8" font-size="9">▪ Alert Rules</text>
       <text x="890" y="377" fill="#7c8ea8" font-size="9">▪ OID Catalog</text>
       <text x="890" y="393" fill="#7c8ea8" font-size="9">▪ Devices + CSV</text>
-      <text x="890" y="409" fill="#7c8ea8" font-size="9">▪ AI Assistant</text>
-      <text x="890" y="425" fill="#7c8ea8" font-size="9">▪ Settings</text>
-      <text x="890" y="441" fill="#7c8ea8" font-size="9">▪ Logs</text>
-      <text x="890" y="457" fill="#7c8ea8" font-size="9">▪ Users / Roles</text>
+      <text x="890" y="409" fill="#7c8ea8" font-size="9">▪ Settings</text>
+      <text x="890" y="425" fill="#7c8ea8" font-size="9">▪ Logs</text>
+      <text x="890" y="441" fill="#7c8ea8" font-size="9">▪ Users / Roles</text>
 
       <!-- ════════════════════════════════════════
            ARROWS
@@ -664,12 +655,6 @@
     </div>
 
     <div class="feat-card">
-      <span class="feat-icon">🤖</span>
-      <div class="feat-title">AI Assistant</div>
-      <div class="feat-body">Anthropic-powered natural language interface. Ask questions about device health, recent metrics, and alert history without writing a single query. Context-aware across your live device and event data.</div>
-    </div>
-
-    <div class="feat-card">
       <span class="feat-icon">🔐</span>
       <div class="feat-title">Enterprise Auth</div>
       <div class="feat-body">JWT access tokens (15 min) + httpOnly refresh tokens (7 days). Okta SAML 2.0 SSO integration. Role-based access control. SNMP community strings and v3 credentials encrypted at rest.</div>
@@ -770,11 +755,6 @@
           <td><strong>Remote Collectors</strong></td>
           <td>otelcol-contrib</td>
           <td>SNMP receiver → <code>otlphttp/pktsnmp</code> exporter · SSH sync from Settings UI · per-collector token rotation</td>
-        </tr>
-        <tr>
-          <td><strong>AI</strong></td>
-          <td>Anthropic Claude</td>
-          <td>Natural language queries over live metrics and alert events via integrated assistant page</td>
         </tr>
         <tr>
           <td><strong>Notifications</strong></td>
