@@ -3,6 +3,7 @@ SNMP API router -- credentials, collectors, devices, OID catalog, ingest, data q
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import secrets
@@ -1874,35 +1875,69 @@ async def snmp_dashboard(_: CurrentUser, db: aiosqlite.Connection = Depends(get_
     trap_timeline: list[dict] = []
     top_sources:   list[dict] = []
     recent_traps:  list[dict] = []
+    # These three panels are backend-specific in two ways that both had to be
+    # handled. Previously this ran `conn.execute(...).fetchall()` synchronously
+    # with DuckDB-only SQL (date_trunc, INTERVAL '24 hours'), which is correct
+    # for DuckDB but wrong on SQLite twice over: aiosqlite's execute() returns a
+    # coroutine, so calling .fetchall() on it raised, and the SQL would not have
+    # parsed anyway. Because the whole block is wrapped in `except Exception`,
+    # that failure was silent — on the SQLite backend the trap timeline, top
+    # sources and recent traps were permanently empty with nothing logged.
     try:
         from app.storage.factory import get_storage
         storage = get_storage()
-        if hasattr(storage, '_conn'):
-            conn = storage._conn
-            tl_rows = conn.execute("""
-                SELECT date_trunc('hour', received_at) AS hr, COUNT(*) AS n
-                FROM snmp_traps
-                WHERE received_at >= now() - INTERVAL '24 hours'
-                GROUP BY hr ORDER BY hr
-            """).fetchall()
+        conn = getattr(storage, "_conn", None)
+        if conn is not None:
+            is_async = hasattr(conn, "execute") and asyncio.iscoroutinefunction(conn.execute)
+
+            if is_async:  # aiosqlite
+                async with conn.execute("""
+                    SELECT strftime('%Y-%m-%dT%H:00:00', received_at) AS hr, COUNT(*) AS n
+                    FROM snmp_traps
+                    WHERE received_at >= datetime('now', '-24 hours')
+                    GROUP BY hr ORDER BY hr
+                """) as cur:
+                    tl_rows = await cur.fetchall()
+                async with conn.execute("""
+                    SELECT source_ip, COUNT(*) AS n
+                    FROM snmp_traps
+                    WHERE received_at >= datetime('now', '-24 hours')
+                    GROUP BY source_ip ORDER BY n DESC LIMIT 10
+                """) as cur:
+                    ts_rows = await cur.fetchall()
+                async with conn.execute("""
+                    SELECT received_at, source_ip, trap_oid, snmp_version
+                    FROM snmp_traps ORDER BY received_at DESC LIMIT 10
+                """) as cur:
+                    rt_rows = await cur.fetchall()
+            else:  # DuckDB / ClickHouse — synchronous cursor
+                tl_rows = conn.execute("""
+                    SELECT date_trunc('hour', received_at) AS hr, COUNT(*) AS n
+                    FROM snmp_traps
+                    WHERE received_at >= now() - INTERVAL '24 hours'
+                    GROUP BY hr ORDER BY hr
+                """).fetchall()
+                ts_rows = conn.execute("""
+                    SELECT source_ip, COUNT(*) AS n
+                    FROM snmp_traps
+                    WHERE received_at >= now() - INTERVAL '24 hours'
+                    GROUP BY source_ip ORDER BY n DESC LIMIT 10
+                """).fetchall()
+                rt_rows = conn.execute("""
+                    SELECT received_at, source_ip, trap_oid, snmp_version
+                    FROM snmp_traps ORDER BY received_at DESC LIMIT 10
+                """).fetchall()
+
             trap_timeline = [{"hour": str(r[0]), "count": int(r[1])} for r in tl_rows]
-            ts_rows = conn.execute("""
-                SELECT source_ip, COUNT(*) AS n
-                FROM snmp_traps
-                WHERE received_at >= now() - INTERVAL '24 hours'
-                GROUP BY source_ip ORDER BY n DESC LIMIT 10
-            """).fetchall()
             top_sources = [{"source_ip": r[0] or "unknown", "count": int(r[1])} for r in ts_rows]
-            rt_rows = conn.execute("""
-                SELECT received_at, source_ip, trap_oid, snmp_version
-                FROM snmp_traps ORDER BY received_at DESC LIMIT 10
-            """).fetchall()
             recent_traps = [
                 {"received_at": str(r[0]), "source_ip": r[1] or "", "trap_oid": r[2] or "", "snmp_version": r[3] or ""}
                 for r in rt_rows
             ]
     except Exception:
-        pass
+        # Still non-fatal — the rest of the dashboard is worth returning — but
+        # no longer invisible.
+        log.warning("Trap dashboard panels could not be loaded", exc_info=True)
     db.row_factory = aiosqlite.Row
     async with db.execute("SELECT COUNT(*) AS n FROM devices") as cur:
         devices_total = (await cur.fetchone())["n"]
