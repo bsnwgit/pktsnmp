@@ -170,6 +170,8 @@ app.add_middleware(
 # ── API Routers ───────────────────────────────────────────────────────────────
 
 from app.api import alerts as alerts_router
+from app.api import resonance as resonance_router
+from app.api import resonance_data as resonance_data_router
 
 app.include_router(auth.router,            prefix="/api/auth",     tags=["auth"])
 app.include_router(users.router,           prefix="/api/users",    tags=["users"])
@@ -185,6 +187,14 @@ app.include_router(mxtoolbox_router.router,     prefix="/api/mxtoolbox",     tag
 app.include_router(integrations_router.router,  prefix="/api/integrations",  tags=["integrations"])
 app.include_router(widgets_router.router,       prefix="/api/widgets",       tags=["widgets"])
 app.include_router(docs_router.router,          prefix="/api/docs-content",  tags=["docs"])
+app.include_router(resonance_router.router,     prefix="/api/resonance",     tags=["resonance"])
+# The assistant's data surface. Carries its own absolute paths — /api/resonance/data/*
+# plus the two documents at /api/resonance/openapi.json and /.well-known/resonance.json —
+# so it is mounted without a prefix, and before the SPA catch-all so the grant file wins
+# over it.
+app.include_router(resonance_data_router.router)
+resonance_data_router.register_error_handler(app)
+resonance_data_router.validate_grants(app)
 
 # ── Health check ──────────────────────────────────────────────────────────────
 
@@ -199,7 +209,12 @@ if _frontend_dist.exists():
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(request: Request, full_path: str):
-        if full_path.startswith("api/"):
+        # /api/ and /.well-known/ are answered by real routes or not at all.
+        # Falling through to index.html gave a 200 of HTML to anything asking
+        # for a well-known document — resonance reading
+        # /.well-known/resonance.json on an install that publishes none got a
+        # page instead of an honest 404.
+        if full_path.startswith("api/") or full_path.startswith(".well-known/"):
             raise HTTPException(status_code=404, detail="Not found")
         # Normalize-then-prefix-check (CodeQL's own documented pattern for
         # py/path-injection) rather than pathlib's resolve()/is_relative_to,
