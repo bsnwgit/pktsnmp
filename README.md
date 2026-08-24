@@ -859,6 +859,61 @@ To configure: in pktIPAM, go to **Settings → Integrations → Suite Integratio
 
 ---
 
+## Resonance (embedded assistant)
+
+Resonance is the suite's shared assistant. It mounts as a launcher in the bottom corner of every
+authenticated page, but the assistant itself runs on the resonance server, not inside pktSNMP.
+Configure it under **Settings → Resonance** (admin only); every field ships blank, so a fresh
+install shows nothing until it is pointed at a resonance server of its own.
+
+`app/integrations/resonance/` and `frontend/src/resonance/` are **vendored** — copied between
+pkt\* apps byte-for-byte except for `APP_SLUG`. They are deliberately not a published package,
+because `install.sh` builds a venv on customer hosts and a private index would put a credentialed
+network dependency in the middle of every install. pktLog is the reference implementation.
+
+```
+browser                 pktSNMP                       resonance
+embed.js  ──GET──▶  /api/resonance/code  ──POST──▶  /embed/session
+          ◀─code──                        ◀─code───
+frame ──────────────────────────────────────────────▶  /embed?c=<code>
+```
+
+pktSNMP vouches for whoever is signed in and receives a short-lived, single-use code. The key is
+encrypted at rest, never reaches the browser, and resonance never sees a pktSNMP credential.
+`GET /api/resonance/code` is the one cookie-authenticated route in the app — `embed.js` fetches it
+itself, outside the SPA, and the access token lives in memory — so `Sec-Fetch-Site` and `Origin`
+are both checked before the cookie is honoured.
+
+**The data surface.** Two documents let resonance discover what it may call, both public because
+they carry names rather than data:
+
+| path | what it is |
+|---|---|
+| `/.well-known/resonance.json` | the grant — the operations this install permits |
+| `/api/resonance/openapi.json` | those operations' OpenAPI, narrowed from the app's own |
+| `/api/resonance/docs` | the shipped guides, for resonance to ingest (suite token or admin) |
+
+Point resonance's **READ SPEC** at `/api/resonance/openapi.json`. The published operations are:
+
+- `getSnmpSummary`
+- `listDevices`
+- `getDevice`
+- `listDeviceInterfaces`
+- `listCollectors`
+- `listAlertEvents`
+- `listAlertRules`
+- `searchApplicationLog`
+- `ackAlertEvent`  *(writes)*
+- `ackAllAlertEvents`  *(writes)*
+- `toggleAlertRule`  *(writes)*
+
+Every call is made by pktSNMP's own page, same-origin, on the session of the person already signed
+in, so nothing here reaches data that person could not already open. Which operations exist is
+fixed in `app/api/resonance_data.py`, not configurable per install. Write operations are withheld
+from the grant entirely until an administrator sets a role to **Read and write**.
+
+**Never exposed:** any SNMP credential — community string, v3 auth or privacy key, collector SSH key or API token. Nothing here creates, edits or deletes a device, collector, credential or OID, and nothing polls on demand.
+
 ## Log Forwarding
 
 pktSNMP writes its own application log to the in-app **Logs** page. It can also
