@@ -124,6 +124,16 @@ Settings → Security → SSL/TLS: toggle HTTPS, upload a PEM cert+key or a PFX/
 
 ## Suite Integration (pktHub)
 
+### Managed mode
+
+pktHub can put this app into **Managed mode**, which stops people reaching its UI directly and sends them to the hub instead. Nothing needs configuring here: the hub sends the address to redirect to when it applies the lock, because that address is built from the hub's own Base URL and this app's id in the hub's registry, and neither is visible from this side.
+
+The lock redirects rather than shuts down. Anything carrying a valid suite token passes through untouched, as do `/api/health`, `/api/suite/`, `/api/auth/` and the paths a hub-rendered page needs, so pktHub itself keeps working normally.
+
+**It expires on its own.** Every call from pktHub refreshes a heartbeat and the lock releases after five minutes without one, so it does not depend on the hub coming back — a lock only pktHub could lift would strand this app exactly when pktHub is what broke. `GET /api/suite/mode` reports the current state without authentication.
+
+For an install with no pktHub in front of it, the address can be set directly with `PATCH /api/suite/hub-redirect-url` (admin session; http/https only, since every visitor follows it while the lock is on). pktHub overwrites it whenever it applies a lock.
+
 pktSNMP can be registered with pktHub for centralized auth/proxying:
 1. Settings → Security → Suite Integration → **Copy Token**.
 2. In pktHub: Settings → App Registry → Register App, paste the token and this app's base URL.
