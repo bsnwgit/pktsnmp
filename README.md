@@ -4,7 +4,7 @@
   <img src="lockup-256h.png" alt="pktSNMP" height="64">
 </p>
 
-SNMP ingest management and visualization platform — part of the pkt suite. Receives SNMP data from remote otelcol collectors and local devices, stores it in SQLite (or ClickHouse/DuckDB), and surfaces it through a React UI with real-time alerting.
+SNMP ingest management and visualization platform — part of the [pkt suite](#the-pkt-suite). Receives SNMP data from remote otelcol collectors and local devices, stores it in SQLite (or ClickHouse/DuckDB), and surfaces it through a React UI with real-time alerting.
 
 **Default port:** `8767` (HTTP) — see [SSL/TLS](#ssltls) for HTTPS.
 
@@ -36,7 +36,7 @@ SNMP ingest management and visualization platform — part of the pkt suite. Rec
 - [Suite Integration](#suite-integration)
 - [Log Forwarding](#log-forwarding)
 - [Data Retention](#data-retention)
-- [Related projects](#related-projects)
+- [The pkt suite](#the-pkt-suite)
 
 ---
 
@@ -1020,16 +1020,32 @@ Every run is logged including no-op runs, so "ran and deleted nothing" stays
 distinguishable from "never ran" — that distinction is exactly what hid the
 original bug.
 
-## Related projects
+## The pkt suite
 
-| Project | Port | Description |
+**pktSNMP** is one of ten apps in the pkt suite — self-hosted tooling for network
+and security operations. Each installs and runs standalone, so take only the ones
+you need; they share one architecture (FastAPI + React), one look, one
+`admin`/`analyst`/`viewer` role model, and a suite token that lets siblings read
+one another's data. Default ports don't collide (8760–8769), so any combination
+runs on a single host.
+
+| App | Port | What it does |
 |---|---|---|
-| pktHub | 8760 | Unified NOC/SOC management hub — registers, proxies, and manages all pktAPP apps |
-| pktFlow | — | NetFlow ingest and visualization (pktSNMP ancestor) |
-| pktLog | — | Syslog ingest and management |
-| pktPCAP | — | Packet capture and analysis |
-| pktIPAM | 8761 | Enterprise IPAM — DHCP/DNS/device reconciliation and conflict detection |
-| pktWiFi | 8769 | Wireless controller/AP monitoring |
+| **[pktFlow](https://github.com/bsnwgit/pktflow)** | `8766` | NetFlow, sFlow and IPFIX collection — flow search, traffic analytics, geo and topology views |
+| **pktSNMP** *(you are here)* | `8767` | SNMP polling and trap receiving for any OID — device health and metric history without a full NMS |
+| **[pktLog](https://github.com/bsnwgit/pktlog)** | `8768` | Syslog over UDP, TCP and TLS — parsing, enrichment, full-text search and forwarding |
+| **[pktPCAP](https://github.com/bsnwgit/pktpcap)** | `8765` | Packet capture analysis in the browser — drop in a `.pcap` for TCP, DNS and threat findings, no Wireshark install |
+| **[pktWiFi](https://github.com/bsnwgit/pktwifi)** | `8769` | Access point, RF and client visibility from Meraki and UniFi controllers or plain SNMP polling |
+| **[pktIPAM](https://github.com/bsnwgit/pktipam)** | `8761` | IP address management reconciling declared subnets against live DHCP, DNS and device data, flagging conflicts |
+| **[pktNode](https://github.com/bsnwgit/pktnode)** | `8764` | Endpoint monitoring and management for Mac, Windows and Linux via a lightweight Go agent |
+| **[pktSecurity](https://github.com/bsnwgit/pktsecurity)** | `8762` | Security operations across the estate — CVE exposure, threat intelligence, ATT&CK-mapped detections and case management |
+| **[pktCert](https://github.com/bsnwgit/pktcert)** | `8763` | TLS certificate discovery and expiry tracking, plus an internal CA — issue, revoke and serve CRLs |
+| **[pktHub](https://github.com/bsnwgit/pkthub)** | `8760` | The front door — one sign-in, one alert stream, NOC wallboards and user management across every registered app |
+
+[pktHub](https://github.com/bsnwgit/pkthub) is optional — it registers the others
+and puts them behind a single login with shared alerting and NOC wallboards — but
+every app is fully usable without it.
+
+More at **[pktsolution.com](https://pktsolution.com)**.
 
 Logos for all pkt apps are served from the pktHub `/logos/` endpoint.
-
