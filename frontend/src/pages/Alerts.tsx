@@ -614,7 +614,7 @@ function ConditionsBuilder({ ruleType, conds, onChange }: {
 
   if (ruleType === 'collector_gap') {
     return (
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="f-tbl-scroll grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Field label="Silence threshold (minutes)" hint="Alert when no polls arrive from the collector for this long">
           <TextInput type="number" value={String(g('silence_minutes', 15))} onChange={v => set('silence_minutes', parseInt(v) || 15)} />
         </Field>
@@ -1629,7 +1629,7 @@ export default function Alerts() {
 
             return (
               <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-                <div className="px-4 py-2.5 border-b border-gray-800 flex items-center gap-3 flex-wrap">
+                <div className="f-tbl-scroll px-4 py-2.5 border-b border-gray-800 flex items-center gap-3 flex-wrap">
                   <input
                     value={rulesFilter}
                     onChange={e => setRulesFilter(e.target.value)}

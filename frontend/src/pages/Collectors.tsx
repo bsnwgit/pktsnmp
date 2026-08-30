@@ -622,7 +622,7 @@ export default function Collectors() {
         {loading ? (
           <div className="flex items-center justify-center h-24 text-white text-sm">Loading…</div>
         ) : (
-          <table className="w-full text-sm">
+          <table className="f-tbl-cards w-full text-sm">
             <thead>
               <tr className="border-b border-gray-800">
                 <th className="px-5 py-3 text-left text-xs font-medium text-gray-400">Collector</th>
@@ -642,7 +642,7 @@ export default function Collectors() {
                     c.id === highlightId ? 'bg-blue-900/30 ring-1 ring-inset ring-blue-500/50' : 'hover:bg-gray-800/30'
                   }`}
                 >
-                  <td className="px-5 py-3">
+                  <td data-label="Collector" className="px-5 py-3">
                     <p className="text-white font-medium text-sm">{c.name}</p>
                     {c.description && <p className="text-xs text-gray-500">{c.description}</p>}
                     {/* Ingest-rate mini sparkline (last 1h, 5-min buckets) */}
@@ -676,8 +676,8 @@ export default function Collectors() {
                         <span className="text-xs text-amber-600 bg-amber-900/20 px-1.5 py-0.5 rounded">no SSH creds</span>}
                     </div>
                   </td>
-                  <td className="px-5 py-3 font-mono text-gray-300 text-xs hidden sm:table-cell">{c.ip ? <IpLink ip={c.ip} /> : '—'}</td>
-                  <td className="px-5 py-3">
+                  <td data-label="IP" className="px-5 py-3 font-mono text-gray-300 text-xs hidden sm:table-cell">{c.ip ? <IpLink ip={c.ip} /> : '—'}</td>
+                  <td data-label="Status" className="px-5 py-3">
                     <div className="text-xs">
                       <span className="flex items-center gap-1.5">
                         <span className={`w-2 h-2 rounded-full flex-shrink-0 ${statusDot(c.effective_status)}`}></span>
@@ -696,7 +696,7 @@ export default function Collectors() {
                       )}
                     </div>
                   </td>
-                  <td className="px-5 py-3 hidden md:table-cell">
+                  <td data-label="Sync" className="px-5 py-3 hidden md:table-cell">
                     <div>
                       <SyncBadge status={c.sync_status} error={c.last_sync_error} />
                       {c.last_synced_at && (
@@ -704,7 +704,7 @@ export default function Collectors() {
                       )}
                     </div>
                   </td>
-                  <td className="px-5 py-3 text-gray-400 text-xs hidden lg:table-cell">{fmtRelative(c.last_seen)}</td>
+                  <td data-label="Last seen" className="px-5 py-3 text-gray-400 text-xs hidden lg:table-cell">{fmtRelative(c.last_seen)}</td>
                   <td className="px-5 py-3">
                     <div className="flex items-center gap-3 justify-end flex-wrap">
                       {/* Admin controls */}
