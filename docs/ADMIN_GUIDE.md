@@ -179,6 +179,10 @@ Where no role is set to *Read and write*, the write operations are withheld from
 
 ## Troubleshooting
 
+The five that come up most often. For anything else — traps, polling, collector
+sync, storage backends, alerts, TLS, upgrades, performance — see
+[TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+
 | Symptom | Check |
 |---|---|
 | Service won't start | `journalctl -u pktsnmp -n 50`; check `config.yaml` paths and `secret_key` |
