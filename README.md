@@ -897,6 +897,10 @@ this app's own role check against the `X-Suite-Role` pktHub asserts.
 which resolves against the parent's height — and collapses to zero against an
 auto-height parent, rendering blank. Maps and canvases hit this first.
 
+### Fabric Integrity widget
+
+The Dashboard's Fabric Integrity dial is available to the NOC Builder as the **Fabric Integrity** widget: the share of enabled devices currently `up`, drawn as a ring (green at 95% and above, amber from 80%, red below).
+
 ### Widget endpoints now require the suite token
 
 `app/api/widgets.py` previously mounted its router with a bare `APIRouter()`,
