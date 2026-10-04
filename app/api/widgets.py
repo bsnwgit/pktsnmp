@@ -61,6 +61,12 @@ MANIFEST = [
         "default_w": 520, "default_h": 200, "min_w": 300, "min_h": 150,
     },
     {
+        "id": "fabric_integrity", "title": "Fabric Integrity", "category": "Overview",
+        "description": "Share of monitored devices currently reachable, as a gauge",
+        "view_path": "/api/widgets/fabric_integrity",
+        "default_w": 300, "default_h": 280, "min_w": 200, "min_h": 200,
+    },
+    {
         "id": "alert_summary", "title": "Alert Summary", "category": "Overview",
         "description": "Active alert counts by severity",
         "view_path": "/api/widgets/alert_summary",
@@ -537,6 +543,38 @@ async def widget_device_summary():
         ("Disabled", disabled),
     ])
     return HTMLResponse(_page("Device Summary", body))
+
+
+# ── Fabric Integrity widget (gauge) ───────────────────────────────────────────
+@router.get("/fabric_integrity", response_class=HTMLResponse, include_in_schema=False)
+async def widget_fabric_integrity():
+    up = total = 0
+    try:
+        async with aiosqlite.connect(_DB) as db:
+            async with db.execute(
+                "SELECT COALESCE(status,'unknown'), COUNT(*) FROM devices WHERE enabled=1 GROUP BY 1"
+            ) as cur:
+                counts = {str(st).lower(): n for st, n in await cur.fetchall()}
+        up, total = counts.get("up", 0), sum(counts.values())
+    except Exception as exc:
+        _note_err(exc)
+    if not total:
+        return HTMLResponse(_page("Fabric Integrity", _empty('No devices are being monitored')))
+    pct = up / total * 100
+    color = "#4ade80" if pct >= 95 else "#fbbf24" if pct >= 80 else "#f87171"
+    r, circ = 54, 2 * 3.14159265 * 54
+    body = (
+        '<div style="display:grid;place-items:center;height:100%">'
+        '<svg viewBox="0 0 140 140" style="width:min(100%,220px);max-height:220px">'
+        f'<circle cx="70" cy="70" r="{r}" fill="none" stroke="#1e293b" stroke-width="9"/>'
+        f'<circle cx="70" cy="70" r="{r}" fill="none" stroke="{color}" stroke-width="9" '
+        f'stroke-linecap="round" stroke-dasharray="{circ:.1f}" '
+        f'stroke-dashoffset="{circ * (1 - pct / 100):.1f}" transform="rotate(-90 70 70)"/>'
+        f'<text x="70" y="70" text-anchor="middle" font-size="26" font-weight="700" fill="#e2e8f0">{pct:.0f}%</text>'
+        f'<text x="70" y="88" text-anchor="middle" font-size="9" fill="#64748b">{up} of {total} reachable</text>'
+        '</svg></div>'
+    )
+    return HTMLResponse(_page("Fabric Integrity", body))
 
 
 # ── Alert Summary widget ──────────────────────────────────────────────────────
