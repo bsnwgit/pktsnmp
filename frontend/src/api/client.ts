@@ -280,6 +280,7 @@ export const api = {
     request<{ enabled: boolean }>('/system/log-forward/reload', { method: 'POST' }),
 
   getSnmpDashboard: () => request<SnmpDashboard>('/snmp/dashboard'),
+  getDashboardCharts: (hours: number) => request<DashboardCharts>(`/dashboard?hours=${hours}`),
   getDeviceTree: () => request<EnvironmentNode[]>('/snmp/devices/tree'),
 
   exportDevices: async (): Promise<void> => {
@@ -695,6 +696,16 @@ export interface HierarchyOrg {
   id: number
   name: string
   groups: HierarchyGroup[]
+}
+
+export interface DashboardCharts {
+  hours: number
+  bucket_seconds: number
+  alert_trend: Array<{ t: number; critical: number; warning: number; info: number }>
+  top_rules:   Array<{ id: number; name: string; count: number }>
+  top_devices: Array<{ id: number; name: string; count: number }>
+  by_type:     Array<{ type: string; count: number }>
+  top_cpu:     Array<{ id: number; name: string; value: number }>
 }
 
 export interface SnmpDashboard {
