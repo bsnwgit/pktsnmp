@@ -7,6 +7,7 @@ import {
 import { useAutoRefresh } from '../store/autoRefresh'
 import DeviceMetricsPanel from '../components/DeviceMetricsPanel'
 import HelpButton from '../components/HelpButton'
+import FleetCharts from '../components/FleetCharts'
 import { RadialGauge, InstrumentFrame, InstrumentHead, glow, INSTRUMENT } from '../components/instrument'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -642,6 +643,19 @@ function EventStream({ traps }: { traps: SnmpDashboard['recent_traps'] }) {
   )
 }
 
+/** Walks the hierarchy for one device by id, whatever the level names are. */
+function findDevice(nodes: unknown, id: number): DeviceTreeNode | null {
+  if (!Array.isArray(nodes)) return null
+  for (const n of nodes as any[]) {
+    if (n?.type === 'device' && n.id === id) return n as DeviceTreeNode
+    for (const v of Object.values(n ?? {})) {
+      const hit = Array.isArray(v) ? findDevice(v, id) : null
+      if (hit) return hit
+    }
+  }
+  return null
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 const EMPTY_DASH: SnmpDashboard = {
@@ -714,7 +728,7 @@ export default function Dashboard() {
         {/* ── main column ── */}
         <div className="min-w-0 space-y-6">
           <div
-            className="grid grid-cols-2 md:grid-cols-4 gap-px border"
+            className="grid grid-cols-2 md:grid-cols-5 gap-px border"
             style={{ background: 'rgba(216,180,110,.08)', borderColor: 'rgba(216,180,110,.08)' }}
           >
             <Readout
@@ -730,6 +744,12 @@ export default function Dashboard() {
               gauge={reachablePct}
               sub={devCounts.total > 0 ? `${devCounts.up} of ${devCounts.total} responding` : undefined}
             />
+            <div className="f-tick relative bg-gray-950 px-5 py-3 min-h-[118px] flex flex-col min-w-0">
+              <div className="f-lbl f-lbl-gold">Fabric Integrity</div>
+              <div className="flex-1 grid place-items-center">
+                <RadialGauge pct={reachablePct} label="" size={104} loading={loading} />
+              </div>
+            </div>
             <Readout
               label="Traps · 24h"
               value={loading ? '…' : dash.traps_24h.toLocaleString()}
@@ -743,16 +763,13 @@ export default function Dashboard() {
             />
           </div>
 
+          <FleetCharts onPickDevice={id => setSelectedDevice(findDevice(tree, id))} />
+
           <EnvironmentTree nodes={tree} loading={loading} onDeviceSelect={setSelectedDevice} />
         </div>
 
         {/* ── telemetry column ── */}
         <aside className="space-y-7 min-w-0">
-          <section>
-            <InstrumentHead>Fabric Integrity</InstrumentHead>
-            <RadialGauge pct={reachablePct} label="Integrity" loading={loading} />
-          </section>
-
           <section>
             <InstrumentHead>Trap Flux · 24h</InstrumentHead>
             <TrapFlux timeline={dash.trap_timeline} total={dash.traps_24h} />

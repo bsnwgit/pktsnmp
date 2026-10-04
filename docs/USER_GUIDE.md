@@ -27,6 +27,8 @@ The top-level pages are **Dashboard**, **Devices**, **Metrics**, **Alerts**, and
 
 The landing page gives an at-a-glance view of your SNMP-monitored environment: device status counts, recent alerts, and top interfaces by traffic/error rate. Use it to spot problems quickly before diving into a specific device.
 
+**Fleet history** sits below the status row, with a window picker (1h, 6h, 24h, 7d). Alerts raised are charted by severity, with the noisiest rules and devices for the same window beside them. Top CPU (the average load across a device's processors, for devices polled in the last 30 minutes) and Devices by type show the fleet as it is now. Click a device in a list to open its metrics panel.
+
 ## Devices
 
 Lists every monitored device, organized under the **Org → Group → Site → Location** hierarchy set up by your admin. Click a device to see its detail view — status, interfaces, and recent metric history. Devices that are unreachable or reporting errors are visually flagged.
