@@ -5,19 +5,12 @@
 </p>
 
 <p align="center">
+  <a href="docs/SCREENSHOTS.md"><strong>View screenshots</strong></a>
+</p>
+
+<p align="center">
   <img src="lockup-256h.png" alt="pktSNMP" height="64">
 </p>
-
-<p align="center">
-  <img src="docs/screenshots/dashboard.webp" alt="pktSNMP — Dashboard" width="900">
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/devices.webp" alt="pktSNMP — Devices" width="430">
-  <img src="docs/screenshots/metrics.webp" alt="pktSNMP — Metrics" width="430">
-</p>
-
-<p align="center"><sub>Dashboard &middot; Devices &middot; Metrics</sub></p>
 
 SNMP ingest management and visualization platform — part of the [pkt suite](#the-pkt-suite). Receives SNMP data from remote otelcol collectors and local devices, stores it in SQLite (or ClickHouse/DuckDB), and surfaces it through a React UI with real-time alerting.
 
