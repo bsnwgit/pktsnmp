@@ -1,6 +1,10 @@
 # pktSNMP
 
 <p align="center">
+  <img src="docs/screenshots/social-preview.png" alt="pktSNMP — Poll any device, graph and alert on it" width="900">
+</p>
+
+<p align="center">
   <img src="lockup-256h.png" alt="pktSNMP" height="64">
 </p>
 
@@ -20,6 +24,14 @@ SNMP ingest management and visualization platform — part of the [pkt suite](#t
 **Default port:** `8767` (HTTP) — see [SSL/TLS](#ssltls) for HTTPS.
 
 ---
+
+## Why pktSNMP
+
+- **Any OID.** Receives SNMP data from remote otelcol collectors and local devices.
+- **History and health.** Stores it in SQLite (or DuckDB) and surfaces device health and metric history in a React UI.
+- **Real-time alerting** through in-app, email, Slack, PagerDuty and webhook channels.
+- **Part of a suite.** One of ten self-hosted pkt apps that share one architecture (FastAPI + React), `admin` / `analyst` / `viewer` roles and a suite token. pktSNMP installs and runs standalone, so take only what you need.
+- **Self-hosted, source-available.** An installer script and a systemd service. Sign in with local accounts or SAML 2.0 SSO. Free for noncommercial use under the [PolyForm Noncommercial License](LICENSE).
 
 ## Table of Contents
 
