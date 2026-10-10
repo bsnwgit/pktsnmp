@@ -132,10 +132,16 @@ async def lifespan(app: FastAPI):
     app.state.local_collector = local_collector
     log.info("Local SNMP collector started")
 
+    import asyncio
+    from app.self_update import run_forever as self_update_run_forever
+    self_update_task = asyncio.create_task(self_update_run_forever())
+    app.state.self_update_task = self_update_task
+
     yield
 
     # ── Shutdown ──────────────────────────────────────────────────────────────
     log.info("pktSNMP shutting down")
+    self_update_task.cancel()
     if hasattr(app.state, "local_collector"):
         await app.state.local_collector.stop()
     await engine.stop()
