@@ -1,4 +1,5 @@
 import { ReactNode, useState, useEffect } from 'react'
+import UpdateBanner from './UpdateBanner'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../store/auth'
 import { api, getToken } from '../api/client'
@@ -350,6 +351,7 @@ export default function Layout({ children, chromeless = false }: { children: Rea
           </div>
         </header>
 
+        <UpdateBanner />
         <main className="flex-1 overflow-auto p-6">
           {children}
         </main>
